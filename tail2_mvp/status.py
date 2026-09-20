@@ -11,8 +11,10 @@ class StatusServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, directory: Path, port: int = 0):
+    def __init__(self, directory: Path, port: int = 0, *, preview=None, overlay=None):
         self.directory = directory.resolve()
+        self.preview = preview
+        self.overlay = overlay
         super().__init__(("127.0.0.1", port), Handler)
 
 
@@ -35,7 +37,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'none'; img-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         self.wfile.write(data)
 
@@ -51,6 +53,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/events":
             data = read_events(self.server.directory)
             self._send(200, json.dumps(data, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+        elif path == "/api/preview.jpg":
+            if self.server.preview is None:
+                self._send(404, b"no preview source", "text/plain"); return
+            try:
+                data = self.server.preview()
+            except Exception as exc:
+                self._send(503, f"preview unavailable: {exc}".encode(), "text/plain"); return
+            self._send(200, data, "image/jpeg")
+        elif path == "/api/overlay":
+            if self.server.overlay is None:
+                self._send(404, b"no overlay source", "text/plain"); return
+            try:
+                data = json.dumps(self.server.overlay(), ensure_ascii=False).encode()
+            except Exception as exc:
+                self._send(503, f"overlay unavailable: {exc}".encode(), "text/plain"); return
+            self._send(200, data, "application/json; charset=utf-8")
         else:
             self._send(404, b"not found", "text/plain")
 

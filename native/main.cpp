@@ -151,7 +151,7 @@ public:
         writable();
         if (op=="target.select") {
             Device::DevTargetSelection s{};
-            s.selection_type=Device::DevTargetSelectionTypeBox;
+            const std::string sel = a.if_contains("selection") ? str(a,"selection") : std::string("box");
             const auto cls=str(a,"class");
             if (cls=="human") s.class_type=Device::DevTargetClassTypeHuman;
             else if (cls=="animal") s.class_type=Device::DevTargetClassTypeAnimal;
@@ -159,14 +159,32 @@ public:
             else throw std::runtime_error("unsupported target class");
             s.zoom_type=Device::DevTargetZoomTypeNormal;
             s.view_type=Device::DevTargetViewTypeIgnored;
-            s.location.roi.x_min=static_cast<float>(num(a,"x1",0,1));
-            s.location.roi.y_min=static_cast<float>(num(a,"y1",0,1));
-            s.location.roi.x_max=static_cast<float>(num(a,"x2",0,1));
-            s.location.roi.y_max=static_cast<float>(num(a,"y2",0,1));
-            if(s.location.roi.x_min>=s.location.roi.x_max || s.location.roi.y_min>=s.location.roi.y_max)
-                throw std::runtime_error("bbox must have positive area");
-            checked_rc(call("aiSetSelectedTargetR(box)",[&]{return dev_->aiSetSelectedTargetR(s);}));
-            return {{"dispatch","accepted"},{"target_acquired",nullptr},{"zoom_policy","normal; reapply framing explicitly"}};
+            if (sel=="box") {
+                s.selection_type=Device::DevTargetSelectionTypeBox;
+                s.location.roi.x_min=static_cast<float>(num(a,"x1",0,1));
+                s.location.roi.y_min=static_cast<float>(num(a,"y1",0,1));
+                s.location.roi.x_max=static_cast<float>(num(a,"x2",0,1));
+                s.location.roi.y_max=static_cast<float>(num(a,"y2",0,1));
+                if(s.location.roi.x_min>=s.location.roi.x_max || s.location.roi.y_min>=s.location.roi.y_max)
+                    throw std::runtime_error("bbox must have positive area");
+            } else if (sel=="center") {
+                s.selection_type=Device::DevTargetSelectionTypeCenter;
+            } else if (sel=="largest") {
+                s.selection_type=Device::DevTargetSelectionTypeLargest;
+            } else if (sel=="clicked") {
+                s.selection_type=Device::DevTargetSelectionTypeClicked;
+                s.location.point.x=static_cast<float>(num(a,"x",0,1));
+                s.location.point.y=static_cast<float>(num(a,"y",0,1));
+            } else throw std::runtime_error("unsupported selection type");
+            checked_rc(call("aiSetSelectedTargetR",[&]{return dev_->aiSetSelectedTargetR(s);}));
+            return {{"dispatch","accepted"},{"selection",sel},{"target_acquired",nullptr},{"zoom_policy","normal; reapply framing explicitly"}};
+        }
+        if (op=="ai.select_biggest" || op=="ai.select_central") {
+            compatibility();
+            const int t = a.if_contains("type") ? static_cast<int>(num(a,"type",-1,200)) : 0;
+            if (op=="ai.select_biggest") checked_rc(call("aiSetSelectBiggestTarget",[&]{return dev_->aiSetSelectBiggestTarget(t);}));
+            else checked_rc(call("aiSetSelectCentralTarget",[&]{return dev_->aiSetSelectCentralTarget(t);}));
+            return {{"dispatch","accepted"},{"type",t}};
         }
         if (op=="target.clear") {
             Device::DevTargetSelection s{};
@@ -185,6 +203,10 @@ public:
         } else if (op=="track.set") {
             compatibility(); bool on=boolean(a,"enabled");
             checked_rc(call("aiSetEnabledR",[&]{return dev_->aiSetEnabledR(on);}));
+        } else if (op=="ai.track_mode") {
+            compatibility(); bool on=boolean(a,"enabled");
+            const double m=num(a,"mode",0,65535); if (std::floor(m)!=m) throw std::runtime_error("integer mode required");
+            checked_rc(call("aiSetAiTrackModeEnabledR",[&]{return dev_->aiSetAiTrackModeEnabledR(static_cast<Device::AiTrackModeType>(static_cast<int>(m)),on);}));
         } else if(op=="look.stop") {
             compatibility();
             int ai_rc=call("aiSetEnabledR(false)",[&]{return dev_->aiSetEnabledR(false);});
@@ -198,6 +220,36 @@ public:
             if(start==0) std::this_thread::sleep_for(std::chrono::milliseconds(duration));
             int stop=call("gimbalSpeedCtrlR(0,0,0)",[&]{return dev_->gimbalSpeedCtrlR(0,0,0);});
             checked_rc(start); checked_rc(stop);
+        } else if(op=="zoom.set") {
+            compatibility();
+            const double z=num(a,"zoom",1.0,10.0);
+            const int speed = a.if_contains("speed") ? static_cast<int>(num(a,"speed",-1,10)) : -1;
+            checked_rc(call("cameraSetZoomAbsoluteR",[&]{return dev_->cameraSetZoomAbsoluteR(static_cast<float>(z),speed);}));
+        } else if(op=="zoom.get") {
+            float z=0; checked_rc(call("cameraGetZoomAbsoluteR",[&]{return dev_->cameraGetZoomAbsoluteR(z);}));
+            return {{"zoom",z}};
+        } else if(op=="zoom.range") {
+            Device::UvcParamRange r; checked_rc(call("cameraGetRangeZoomAbsoluteR",[&]{return dev_->cameraGetRangeZoomAbsoluteR(r);}));
+            return {{"min",r.min_},{"max",r.max_},{"step",r.step_},{"default",r.default_},{"valid",r.valid_}};
+        } else if(op=="ai.auto_zoom") {
+            compatibility(); bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetAiAutoZoomR",[&]{return dev_->aiSetAiAutoZoomR(on);}));
+        } else if(op=="ai.control.get") {
+            compatibility();
+            auto target=static_cast<Device::DevControlTargetType>(static_cast<int>(num(a,"target_type",0,2)));
+            auto para=static_cast<Device::DevControlParaType>(static_cast<int>(num(a,"para",0,100)));
+            const std::string kind = a.if_contains("kind") ? str(a,"kind") : std::string("float");
+            if(kind=="bool") { bool v=false; checked_rc(call("aiGetControlParaR(bool)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"kind","bool"},{"value",v}}; }
+            if(kind=="int") { int v=0; checked_rc(call("aiGetControlParaR(int)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"kind","int"},{"value",v}}; }
+            float v=0; bool fault=false; checked_rc(call("aiGetControlParaR(float)",[&]{return dev_->aiGetControlParaR(target,para,v,fault);})); return {{"kind","float"},{"value",v},{"fault",fault}};
+        } else if(op=="ai.control.set") {
+            compatibility();
+            auto target=static_cast<Device::DevControlTargetType>(static_cast<int>(num(a,"target_type",0,2)));
+            auto para=static_cast<Device::DevControlParaType>(static_cast<int>(num(a,"para",0,100)));
+            const std::string kind = a.if_contains("kind") ? str(a,"kind") : std::string("float");
+            if(kind=="bool") { bool v=boolean(a,"value"); checked_rc(call("aiSetControlParaR(bool)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","bool"},{"value",v}}; }
+            if(kind=="int") { int v=static_cast<int>(num(a,"value",-1000000,1000000)); checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","int"},{"value",v}}; }
+            float v=static_cast<float>(num(a,"value",-1000000,1000000)); checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","float"},{"value",v}};
         } else if(op=="record.start" || op=="record.stop" || op=="capture.device") {
             auto stream=op=="capture.device" ? Device::DevMediaStreamIdCapture : Device::DevMediaStreamIdRecord;
             auto action=op=="record.stop" ? Device::DevMediaParamOperationStop : Device::DevMediaParamOperationStart;

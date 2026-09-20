@@ -103,11 +103,14 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(status,200); self.assertIn(b"Capability Observer",data)
         self.assertEqual(headers["Cache-Control"],"no-store")
         self.assertIn("frame-ancestors 'none'",headers["Content-Security-Policy"])
+        self.assertIn("img-src 'self'",headers["Content-Security-Policy"])
 
     def test_no_writes_or_files(self):
         for path in ("/../../README.md","/api/control","/private/frame.jpg"):
             self.assertEqual(self.get(path)[0],404)
         self.assertEqual(self.get("/api/state",method="POST")[0],405)
+        self.assertEqual(self.get("/api/preview.jpg")[0],404)
+        self.assertEqual(self.get("/api/overlay")[0],404)
 
     def test_origin_host(self):
         self.assertEqual(self.get(headers={"Host":"evil.example"})[0],403)
@@ -117,6 +120,44 @@ class HttpTests(unittest.TestCase):
         with Trace(Path(self.temp.name)) as trace: trace.emit("probe.request",{"op":"hello"})
         status,data,_=self.get("/api/events")
         self.assertEqual(status,200); self.assertEqual(len(json.loads(data)),2)
+
+
+class LiveHttpTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.server=StatusServer(Path(self.temp.name), preview=lambda: b"\xff\xd8fake-jpeg",
+                                 overlay=lambda: {"frame":{"width":64,"height":48,"seq":5},
+                                                  "candidates":[],"requested_roi":None,
+                                                  "notes":["requested_roi is not a native device tracking box"]})
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True); self.thread.start()
+        self.addCleanup(self.cleanup_server)
+
+    def cleanup_server(self):
+        self.server.shutdown(); self.server.server_close(); self.thread.join(timeout=1)
+
+    def get(self,path):
+        c=http.client.HTTPConnection("127.0.0.1",self.server.server_port,timeout=3)
+        try:
+            c.request("GET",path); r=c.getresponse(); return r.status,r.read(),dict(r.getheaders())
+        finally: c.close()
+
+    def test_preview(self):
+        status,data,headers=self.get("/api/preview.jpg")
+        self.assertEqual(status,200); self.assertEqual(headers["Content-Type"],"image/jpeg")
+        self.assertEqual(headers["Cache-Control"],"no-store"); self.assertTrue(data.startswith(b"\xff\xd8"))
+
+    def test_overlay(self):
+        status,data,_=self.get("/api/overlay")
+        self.assertEqual(status,200)
+        overlay=json.loads(data)
+        self.assertIsNone(overlay["requested_roi"])
+        self.assertIn("tracking box",overlay["notes"][0])
+
+    def test_preview_error_is_503(self):
+        def boom():
+            raise RuntimeError("camera busy")
+        self.server.preview=boom
+        self.assertEqual(self.get("/api/preview.jpg")[0],503)
 
 
 @unittest.skipUnless(os.environ.get("TAIL2_PROBE"), "compiled native probe not supplied")
