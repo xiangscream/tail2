@@ -1,6 +1,6 @@
 import unittest
 
-from tail2_mvp.calibration import RoiCalibration
+from tail2_mvp.calibration import CalibrationStore, RoiCalibration
 from tail2_mvp.contracts import Box
 
 
@@ -52,3 +52,47 @@ class CalibrationTests(unittest.TestCase):
         described = cal.describe()
         self.assertTrue(described["verified"])
         self.assertEqual(described["note"], "left/center/right")
+
+
+class CalibrationStoreTests(unittest.TestCase):
+    IDENTITY = {"left": (0.2, 0.5), "center": (0.5, 0.5), "right": (0.8, 0.5),
+                "top": (0.5, 0.2), "middle": (0.5, 0.5), "bottom": (0.5, 0.8)}
+
+    def seed(self, store, mapping):
+        for position, (x, y) in mapping.items():
+            store.add_sample(position, "obs", x, y)
+
+    def test_derives_identity(self):
+        store = CalibrationStore()
+        store.set_profile(calibration_id="c")
+        self.seed(store, self.IDENTITY)
+        profile = store.verify()
+        self.assertTrue(profile.verified)
+        self.assertFalse(profile.mirror_x)
+        self.assertEqual(profile.rotation_deg, 0)
+
+    def test_derives_mirror(self):
+        store = CalibrationStore()
+        store.set_profile(calibration_id="c")
+        mirrored = dict(self.IDENTITY)
+        mirrored["left"], mirrored["right"] = (0.8, 0.5), (0.2, 0.5)
+        self.seed(store, mirrored)
+        self.assertTrue(store.verify().mirror_x)
+
+    def test_rejects_non_monotonic(self):
+        store = CalibrationStore()
+        store.set_profile(calibration_id="c")
+        bad = dict(self.IDENTITY)
+        bad["left"] = (0.6, 0.5)
+        self.seed(store, bad)
+        with self.assertRaises(ValueError):
+            store.verify()
+
+    def test_reconnect_invalidates(self):
+        store = CalibrationStore()
+        store.set_profile(calibration_id="c")
+        self.seed(store, self.IDENTITY)
+        store.verify()
+        store.bind_camera_epoch(0)
+        store.bind_camera_epoch(1)
+        self.assertFalse(store.profile().verified)

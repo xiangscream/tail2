@@ -120,8 +120,21 @@ class CalibrationStore:
         missing = [position for position in REQUIRED_POSITIONS if position not in self._samples]
         if missing:
             raise ValueError(f"cannot verify: missing samples {missing}")
+        xs = {position: self._samples[position]["x"] for position in REQUIRED_POSITIONS}
+        ys = {position: self._samples[position]["y"] for position in REQUIRED_POSITIONS}
+        left, center, right = xs["left"], xs["center"], xs["right"]
+        top, middle, bottom = ys["top"], ys["middle"], ys["bottom"]
+        horizontal = left < center < right or left > center > right
+        vertical = top < middle < bottom or top > middle > bottom
+        if not horizontal or min(abs(left - center), abs(center - right)) < 0.05:
+            raise ValueError("horizontal samples must be monotonic left/center/right with >0.05 separation")
+        if not vertical or min(abs(top - middle), abs(middle - bottom)) < 0.05:
+            raise ValueError("vertical samples must be monotonic top/middle/bottom with >0.05 separation")
+        mirror_x = left > right
+        rotation_deg = 180 if top > bottom else 0
         recorded = tuple((position, dict(self._samples[position])) for position in REQUIRED_POSITIONS)
-        self._profile = replace(self._profile, verified=True, samples=recorded)
+        self._profile = replace(self._profile, verified=True, mirror_x=mirror_x,
+                                rotation_deg=rotation_deg, samples=recorded)
         self._persist()
         return self._profile
 
