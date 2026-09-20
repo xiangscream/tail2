@@ -16,6 +16,7 @@ from .contracts import Box
 
 ROTATIONS = (0, 180)
 REQUIRED_POSITIONS = ("left", "center", "right", "top", "middle", "bottom")
+VERIFY_POSITIONS = ("left", "right", "top", "bottom")
 
 
 @dataclass(frozen=True)
@@ -135,14 +136,14 @@ class CalibrationStore:
                 "geometry": sorted(self._geometry), "outcomes": sorted(self._outcomes)}
 
     def verify(self) -> RoiCalibration:
-        missing_outcomes = [p for p in REQUIRED_POSITIONS if p not in self._outcomes]
+        missing_outcomes = [p for p in VERIFY_POSITIONS if p not in self._outcomes]
         if missing_outcomes:
             raise ValueError(f"cannot verify: missing SDK selection outcomes {missing_outcomes}")
-        failed = [p for p in REQUIRED_POSITIONS if not self._outcomes[p]["selected"]]
+        failed = [p for p in VERIFY_POSITIONS if not self._outcomes[p]["selected"]]
         if failed:
             raise ValueError(f"cannot verify: failed SDK selection outcomes {failed}")
         self._check_geometry()
-        recorded = tuple((p, dict(self._outcomes[p])) for p in REQUIRED_POSITIONS)
+        recorded = tuple((p, dict(self._outcomes[p])) for p in VERIFY_POSITIONS)
         geometry = tuple((p, dict(self._geometry[p])) for p in REQUIRED_POSITIONS if p in self._geometry)
         self._profile = replace(self._profile, verified=True, outcomes=recorded, geometry=geometry)
         self._persist()

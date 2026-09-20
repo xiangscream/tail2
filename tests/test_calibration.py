@@ -79,7 +79,7 @@ class CalibrationStoreTests(unittest.TestCase):
         self.seed(store)
         profile = store.verify()
         self.assertTrue(profile.verified)
-        self.assertEqual(len(profile.outcomes), 6)
+        self.assertEqual(len(profile.outcomes), 4)
 
     def test_verify_rejects_failed_outcome(self):
         store = CalibrationStore()

@@ -143,7 +143,7 @@ class Observer:
 
     def _enter_track(self, selection: str = "center", attempts: int = 20) -> dict:
         snapshot = self.service.snapshot(write=False)
-        response = self._call("target.select", {"selection": selection,
+        response = self._call("target.select", {"class": "human", "selection": selection,
                                                 "observation_id": snapshot["observation_id"]})
         if not response.get("ok"):
             raise RuntimeError(response.get("error", "track enter rejected"))
@@ -218,10 +218,11 @@ class Observer:
         while self.clock() < end:
             time.sleep(0.5)
             follow, _ = self._observe_target(attempts=1)
-            samples.append(round((follow["bbox"][0] + follow["bbox"][2]) / 2, 3) if follow else None)
+            samples.append({"cx": round((follow["bbox"][0] + follow["bbox"][2]) / 2, 3),
+                            "cy": round((follow["bbox"][1] + follow["bbox"][3]) / 2, 3)} if follow else None)
         return {"position": position, "observation_id": snapshot["observation_id"], "uvc_bbox": list(bbox),
                 "sdk_roi": roi, "entered_track": entered, "ai_main_mode": mode,
-                "cx_before": round(cx0, 3), "cy_before": round(cy0, 3), "cx_samples": samples,
+                "cx_before": round(cx0, 3), "cy_before": round(cy0, 3), "samples": samples,
                 "note": "record the SDK selection outcome via calibration.outcome after visual check"}
 
     def calibration_outcome(self, args: dict) -> dict:
@@ -439,6 +440,13 @@ class Observer:
             response = self._call(op, args)
             if not response.get("ok"):
                 raise RuntimeError(response.get("error", "ai.control.set rejected"))
+            return response.get("result", {})
+        if op in ("camera.face_ae", "camera.exposure_mode", "camera.ev_bias"):
+            self._require_control()
+            self._require_legacy()
+            response = self._call(op, args)
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", f"{op} rejected"))
             return response.get("result", {})
         raise ValueError("unsupported observer op")
 

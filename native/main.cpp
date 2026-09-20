@@ -274,6 +274,15 @@ public:
             else if(spec->kind=='i'){ checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<int>(raw));})); }
             else { checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<float>(raw));})); }
             return {{"para",pt},{"name",std::string(spec->name)},{"kind",std::string(1,spec->kind)},{"value",raw}};
+        } else if(op=="camera.face_ae") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("cameraSetFaceAER",[&]{return dev_->cameraSetFaceAER(on?1:0);}));
+        } else if(op=="camera.exposure_mode") {
+            compatibility(); const int m=static_cast<int>(num(a,"mode",0,4));
+            checked_rc(call("cameraSetExposureModeR",[&]{return dev_->cameraSetExposureModeR(m);}));
+        } else if(op=="camera.ev_bias") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,18));
+            checked_rc(call("cameraSetPAEEvBiasR",[&]{return dev_->cameraSetPAEEvBiasR(v);}));
         } else if(op=="record.start" || op=="record.stop" || op=="capture.device") {
             auto stream=op=="capture.device" ? Device::DevMediaStreamIdCapture : Device::DevMediaStreamIdRecord;
             auto action=op=="record.stop" ? Device::DevMediaParamOperationStop : Device::DevMediaParamOperationStart;
