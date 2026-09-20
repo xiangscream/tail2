@@ -2,53 +2,68 @@
 
 2026-09-20 · Tail2 Embodied Agent MVP
 
-当前开发基线：`kickoff/embodied-m0-20260920 @ d7249cac464a61882088c062cd11796f0cb1a914`。
+当前开发基线：`kickoff/embodied-m0-20260920 @ 3609199f13fc06e5a0af9c71d0723aa1421a3fec`。
 
 ## 已完成
 
-M0 首轮 Windows / 真机 bring-up 已回读并合入 kickoff：
+M0 + M0.5 基础设施已合入：
 
-- Windows x64 Release 构建与 29/29 测试通过；
-- Tail2 UVC 枚举和名称级设备绑定通过；
-- UVC Snapshot 可取得；
-- `look.stop`、`track.set(false)` 与小范围 gimbal speed 真机有效；
-- 状态页只读端点通过；
-- 原生候选列表没有找到正式接口；
-- UVC 下机内 Record 不作为 MVP 主路线；
-- Boost.Container Windows autolink 修复已合入。
+- Windows x64 / 真 SDK 构建通过；本地报告 71/71，GitHub CI 四矩阵通过。
+- 单 UVC 属主 Observation Service；按设备名绑定，断线重连 bump `camera_epoch`。
+- frame-bound Observation / Candidate / Target 引用；Target 下发前校验 session / epoch / freshness / calibration / candidate membership。
+- `host_uvc` photo / record 基础实现；photo 严格取请求后的新帧。
+- localhost 只读预览页：preview、candidate、requested ROI、AI 状态、云台 last-good/stale。
+- bounded device discovery；gimbal getter 失败使用 last-good + stale。
+- Target Box / Center / Largest / Clicked、zoom、ai.control read probe 等已加入 native 探针。
+- `ai.control` 已改为文档化 allowlist；set 默认关闭。
+- SDK 能力底座：`../Tail2_CAPABILITY_MAP.md`。
 
-原始脱敏报告：`inbox/2026-09-20-m0-windows.md`。
+真机关键发现：
 
-产品与架构裁决：`../M0_DECISIONS_2026-09-20.md`。
+- `target.select(Box)` 被接受但不会自动进入 Track；Center/Largest 会把 `ai_main_mode` 置为 Track。
+- 设备端 Track 已开启时，目标运动会带动 yaw；SDK 侧 Track 启动语义仍需收敛。
+- `framing.set(Full/Half/Close)` 视觉变化弱；显式 zoom 真机有效。
+- Native candidate list 无可用正式接口；MVP 继续以 Host Detector 为主 Provider。
+- UVC 下 device-native Record 不进入 MVP 主链；默认 media Provider 为 `host_uvc`。
 
-## 当前未通过的核心链
+脱敏报告：
+- `inbox/2026-09-20-m0-windows.md`
+- `inbox/2026-09-20-m0-5-target-loop.md`
 
-**Target B 仍未完成。**
+## 当前未完成的核心问题
 
-必须验证：
+M0.5 的基础运行时成立，但下列产品语义仍未冻结：
 
-`UVC Observation → calibrated ROI → target.select(box) → concrete target → Tracking → Framing → new Observation`
+1. **Track enable**：设备端真正进入 Track 的可重复 SDK / 状态路径。
+2. **ROI mapping**：UVC → SDK ROI 的真实左/中/右、上/中/下现场标定。
+3. **Framing execution**：Full / Half / Close 应如何组合 auto zoom、composition、offset 与显式 zoom。
+4. **Agent Observation**：未来 Agent 必须使用 frame-bound Observation 原子对象；状态页 `preview.jpg + overlay` 仅用于观察，不是正式 Target 引用。
+5. **Media reconnect**：host_uvc recording 遇 camera_epoch 变化时需要 abort / finalize 规则。
 
-现在不能把 Target / Framing 写成 Agent 可用的完成能力。
-
-## 已冻结的下一阶段选择
-
-- Candidate：Host Detector 为主 Provider；Agent bbox 为 fallback。Native candidates 不阻塞项目。
-- Media：MVP 默认 `host_uvc`。观察、photo、record 共享一个 UVC 采集进程。
-- 状态页：允许增加 localhost 预览、候选框、requested ROI、云台 last-good 状态；没有 native 来源时不显示“实时跟踪框”。
-- 单写者：一个 Observation Service 独占 UVC；状态页和 Agent 不再单独打开设备。
-- Position/Preset、device-native media 与 SDK Owner 的 candidate 询问为 P1。
+现在仍不能把 Target / Track / Framing 全部标成 Agent-ready。
 
 ## 本地 Agent 下一步
 
-执行 M0.5：ROI mapping + Box / Tracking / Framing + 长驻 Observation Service。
+Issue #4 继续，先做**只读实验**：
 
-从 kickoff 精确基线开新分支，先读：
+1. Human `ai.control.get` para 0–23：Normal 与设备端 Gesture Track 两态 dump + diff。
+2. 记录两态下 `ai_main_mode / ai_sub_mode / gimbal / zoom`。
+3. 四条窄序列：
+   - Normal → Box
+   - Normal → Center → Track → Box
+   - Normal → Largest → Track → Box
+   - Gesture Track → Box
+4. 只在上述结果明确后，再进入构图相关参数的单参数 GET → SET → Observe → Restore。
 
-1. `docs/M0_DECISIONS_2026-09-20.md`
-2. `docs/CAPABILITY_CONTRACT.md`
-3. 下一轮 GitHub issue
+ROI 标定必须使用真实不同现场位置并记录实际 SDK 选中结果。当前 CalibrationStore 的 verified 视为受监督操作员门禁，不代表自动几何证明。
 
-不要接多模态模型，不开始 Application，不切网络视频路线，不上传真实人物图像。
+不要开始多模态 Agent、Application、网络视频路线或大范围 ai.control 写扫描。
 
-M0.5 通过后，网页端开始 M1 Capability Runtime 的正式实现与审查。
+## 进入 M1 的门槛
+
+当以下两条有可重复结果后，网页端正式冻结 M1 Capability Runtime：
+
+- 具体 Target 能在明确 Track state 下稳定被设备接管；
+- Framing 至少有一条可解释的执行路径并能用新 Observation 验证。
+
+Issue #4：<https://github.com/xiangscream/tail2/issues/4>
