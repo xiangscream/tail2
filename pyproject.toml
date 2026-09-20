@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-vision = ["opencv-python>=4.10,<5"]
+vision = ["opencv-python>=4.10,<5", "pygrabber>=0.2"]
 
 [project.scripts]
 tail2-mvp = "tail2_mvp.__main__:main"

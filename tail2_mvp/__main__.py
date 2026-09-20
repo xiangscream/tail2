@@ -7,6 +7,7 @@ from pathlib import Path
 from .bridge import Bridge, BridgeError
 from .events import Trace
 from .observation import capture_snapshot
+from .observer import run_observer
 from .status import serve
 
 
@@ -53,12 +54,39 @@ def main() -> int:
     s.add_argument("--human-candidates", action="store_true"); s.add_argument("--timeout", type=float, default=20)
     w = sub.add_parser("status"); w.add_argument("--trace", type=Path, required=True)
     w.add_argument("--port", type=int, default=0)
+    o = sub.add_parser("observe", help="single-owner UVC observation service plus supervised SDK control")
+    o.add_argument("--bridge", type=Path, required=True)
+    o.add_argument("--trace", type=Path, required=True)
+    o.add_argument("--index", type=int)
+    o.add_argument("--backend", choices=["dshow", "msmf", "v4l2", "any"], required=True)
+    o.add_argument("--device-name")
+    o.add_argument("--out", type=Path, default=Path(".local/service"))
+    o.add_argument("--serial")
+    o.add_argument("--detect", action="store_true")
+    o.add_argument("--detect-face", action="store_true")
+    o.add_argument("--width", type=int)
+    o.add_argument("--height", type=int)
+    o.add_argument("--preview-width", type=int, default=640)
+    o.add_argument("--port", type=int, default=0)
+    o.add_argument("--discover-timeout", type=float, default=15.0)
+    o.add_argument("--per-call-wait-ms", type=int, default=1500)
+    o.add_argument("--command-file", type=Path)
+    o.add_argument("--gimbal-poll-s", type=float, default=0.0)
+    o.add_argument("--allow-control", action="store_true")
+    o.add_argument("--allow-legacy-probes", action="store_true")
+    o.add_argument("--allow-control-writes", action="store_true")
     a = p.parse_args()
     try:
         if a.command == "probe":
             probe(a)
         elif a.command == "snapshot":
             print(capture_snapshot(a.index, a.backend, a.out, human_candidates=a.human_candidates, timeout=a.timeout))
+        elif a.command == "observe":
+            if not 0 <= a.port <= 65535:
+                p.error("port out of range")
+            if a.index is None and not a.device_name:
+                p.error("provide --index or --device-name")
+            return run_observer(a)
         else:
             if not 0 <= a.port <= 65535:
                 p.error("port out of range")
