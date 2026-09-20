@@ -1,8 +1,9 @@
 """Supervised M0.5 observer.
 
 One Observation Service owns Tail2 UVC; the native bridge owns SDK control.
-Target selection converts a calibrated UVC box into an SDK ROI and records the
-requested ROI separately from any device-reported state.
+Target selection must reference the frame the caller actually observed; the
+adapter never replaces it with a fresh snapshot. Calibration is only usable
+after a persisted on-device sample set is verified.
 """
 from __future__ import annotations
 
@@ -14,10 +15,11 @@ import time
 from pathlib import Path
 
 from .bridge import Bridge
-from .calibration import RoiCalibration
+from .calibration import CalibrationStore
 from .contracts import Box
 from .events import Trace
 from .observation_service import ObservationService, UvcFrameSource
+from .observations import ObservationStore, ReobserveRequired, record_from_snapshot
 from .state import LastGood, detect_uvc_conflicts, discover_tail2
 from .status import StatusServer
 
@@ -60,14 +62,17 @@ def face_detector(frame, width: int, height: int) -> list[dict]:
 
 class Observer:
     def __init__(self, service: ObservationService, bridge: Bridge, trace: Trace, *,
-                 calibration: RoiCalibration | None = None, control: bool = False, legacy: bool = False,
-                 conflicts: list[str] | None = None, clock=time.monotonic, gimbal_stale_s: float = 3.0):
+                 calibration: CalibrationStore | None = None, control: bool = False, legacy: bool = False,
+                 conflicts: list[str] | None = None, clock=time.monotonic, gimbal_stale_s: float = 3.0,
+                 allow_control_writes: bool = False):
         self.service = service
         self.bridge = bridge
         self.trace = trace
-        self.calibration = calibration or RoiCalibration.unverified()
+        self.calibration = calibration or CalibrationStore()
+        self.observations = ObservationStore()
         self.control = control
         self.legacy = legacy
+        self.allow_control_writes = allow_control_writes
         self.conflicts = conflicts or []
         self.clock = clock
         self.gimbal = LastGood(stale_after_s=gimbal_stale_s)
@@ -77,6 +82,7 @@ class Observer:
         self.track = {"requested": None, "sdk_reported": None}
         self.framing = {"requested": None, "sdk_reported": None, "visual_check": None}
         self.ai_status: dict = {}
+        self._last_epoch = service.camera_epoch
         self._lock = threading.Lock()
 
     def _require_control(self) -> None:
@@ -95,41 +101,90 @@ class Observer:
             self.ai_status = {k: result.get(k) for k in
                               ("ai_main_mode_raw", "ai_sub_mode_raw", "record_operation_raw")}
 
-    def set_calibration(self, args: dict) -> dict:
-        crop = args.get("crop")
-        self.calibration = RoiCalibration(
+    def _sync_epoch(self) -> None:
+        epoch = self.service.camera_epoch
+        if epoch != self._last_epoch:
+            self._last_epoch = epoch
+            self.calibration.bind_camera_epoch(epoch)
+            with self._lock:
+                self.requested_roi = None
+                self.requested_roi_sdk = None
+                self.selected = None
+
+    def snapshot(self, args: dict | None = None) -> dict:
+        self._sync_epoch()
+        write = bool((args or {}).get("write", True))
+        snapshot = self.service.snapshot(write=write)
+        record = record_from_snapshot(snapshot, calibration_id=self.calibration.calibration_id,
+                                      provider=snapshot.get("provider"))
+        self.observations.put(record)
+        snapshot = dict(snapshot)
+        snapshot["calibration_id"] = record.calibration_id
+        return snapshot
+
+    def calibration_profile(self, args: dict) -> dict:
+        profile = self.calibration.set_profile(
             calibration_id=args.get("calibration_id", "on-device"),
-            verified=bool(args.get("verified", False)),
             mirror_x=bool(args.get("mirror_x", False)),
             rotation_deg=int(args.get("rotation_deg", 0)),
-            crop=tuple(float(v) for v in crop) if crop else None,
+            crop=args.get("crop"),
             zoom=float(args.get("zoom", 1.0)),
             note=args.get("note", ""),
-        )
-        return self.calibration.describe()
+            camera_epoch=self.service.camera_epoch,
+            width=self.service.status().get("width"), height=self.service.status().get("height"))
+        return profile.describe()
+
+    def calibration_sample(self, args: dict) -> dict:
+        observation_id = args.get("observation_id")
+        if not observation_id:
+            raise ValueError("observation_id required; take a snapshot at the known position first")
+        record = self.observations.validate(
+            observation_id, stream_session=self.service.stream_session,
+            camera_epoch=self.service.camera_epoch, now_mono=self.clock(),
+            max_age_s=self.service.max_frame_age_s, calibration_id=self.calibration.calibration_id)
+        candidate_id = args.get("candidate_id")
+        if candidate_id:
+            candidate = record.candidate(candidate_id)
+            x = (candidate.bbox[0] + candidate.bbox[2]) / 2
+            y = (candidate.bbox[1] + candidate.bbox[3]) / 2
+        else:
+            x, y = float(args["x"]), float(args["y"])
+        return self.calibration.add_sample(args["position"], observation_id, x, y)
 
     def target_select(self, args: dict) -> dict:
         self._require_control()
+        self._sync_epoch()
+        observation_id = args.get("observation_id")
+        if not observation_id:
+            raise ReobserveRequired("observation_id required; observe a frame before selecting")
+        record = self.observations.validate(
+            observation_id, stream_session=self.service.stream_session,
+            camera_epoch=self.service.camera_epoch, now_mono=self.clock(),
+            max_age_s=self.service.max_frame_age_s, calibration_id=self.calibration.calibration_id)
         selection = args.get("selection", "box")
         target_class = args.get("class", "human")
         if target_class not in TARGET_CLASSES:
             raise ValueError("unsupported target class")
         payload = {"class": target_class, "selection": selection}
-        observation_id = None
+        candidate_id = args.get("candidate_id")
         if selection == "box":
-            for key in ("x1", "y1", "x2", "y2"):
-                if key not in args:
-                    raise ValueError(f"missing {key}")
-            observation = self.service.snapshot(write=False)
-            if not observation["fresh"]:
-                raise ValueError("observation is stale; re-observe before selecting")
-            observation_id = observation["observation_id"]
-            box = Box(float(args["x1"]), float(args["y1"]), float(args["x2"]), float(args["y2"]))
-            roi = self.calibration.to_sdk(box)
+            if candidate_id:
+                candidate = record.candidate(candidate_id)
+                bbox = candidate.bbox
+                target_class = candidate.category
+                payload["class"] = target_class
+            else:
+                for key in ("x1", "y1", "x2", "y2"):
+                    if key not in args:
+                        raise ValueError(f"missing {key} or candidate_id")
+                bbox = (float(args["x1"]), float(args["y1"]), float(args["x2"]), float(args["y2"]))
+            box = Box(*bbox)
+            roi = self.calibration.profile().to_sdk(box)
             payload.update(roi)
-            self.requested_roi = [box.x1, box.y1, box.x2, box.y2]
+            self.requested_roi = list(bbox)
             self.requested_roi_sdk = [roi["x1"], roi["y1"], roi["x2"], roi["y2"]]
-            self.selected = {"observation_id": observation_id, "class": target_class, "roi": roi}
+            self.selected = {"observation_id": observation_id, "candidate_id": candidate_id,
+                             "class": target_class, "roi": roi, "frame_seq": record.frame_seq}
         elif selection == "clicked":
             payload["x"] = float(args["x"])
             payload["y"] = float(args["y"])
@@ -138,8 +193,9 @@ class Observer:
             raise RuntimeError(response.get("error", "target.select rejected"))
         self.framing["visual_check"] = None
         return {"dispatch": "accepted", "selection": selection, "observation_id": observation_id,
-                "requested_roi": self.requested_roi, "requested_roi_sdk": self.requested_roi_sdk,
-                "calibration": self.calibration.describe(), "sdk": response,
+                "frame_seq": record.frame_seq, "requested_roi": self.requested_roi,
+                "requested_roi_sdk": self.requested_roi_sdk, "calibration": self.calibration.profile().describe(),
+                "sdk": response,
                 "side_effects": "UNVERIFIED: check whether tracking/zoom changed; SDK rc=0 is not visual proof"}
 
     def target_clear(self) -> dict:
@@ -196,8 +252,9 @@ class Observer:
         return response
 
     def status(self) -> dict:
+        self._sync_epoch()
         with self._lock:
-            return {"service": self.service.status(), "calibration": self.calibration.describe(),
+            return {"service": self.service.status(), "calibration": self.calibration.profile().describe(),
                     "requested_roi": self.requested_roi, "requested_roi_sdk": self.requested_roi_sdk,
                     "selected": self.selected, "track": self.track, "framing": self.framing,
                     "ai": self.ai_status, "gimbal": self.gimbal.read(self.clock()),
@@ -209,7 +266,7 @@ class Observer:
             return {"frame": {"width": service["width"], "height": service["height"],
                               "seq": service["frames"], "age_s": service["last_frame_age_s"]},
                     "candidates": self.service.candidates(), "requested_roi": self.requested_roi,
-                    "requested_roi_sdk": self.requested_roi_sdk, "calibration": self.calibration.describe(),
+                    "requested_roi_sdk": self.requested_roi_sdk, "calibration": self.calibration.profile().describe(),
                     "gimbal": self.gimbal.read(self.clock()), "track": self.track,
                     "framing": self.framing, "ai": self.ai_status, "service": service,
                     "conflicts": self.conflicts,
@@ -219,13 +276,17 @@ class Observer:
         op = request.get("op")
         args = request.get("args") or {}
         if op == "snapshot":
-            return self.service.snapshot()
+            return self.snapshot(args)
         if op == "candidates":
             return {"provider": "host_detector", "candidates": self.service.candidates()}
-        if op == "calibration.set":
-            return self.set_calibration(args)
+        if op == "calibration.profile":
+            return self.calibration_profile(args)
+        if op == "calibration.sample":
+            return self.calibration_sample(args)
+        if op == "calibration.verify":
+            return self.calibration.verify().describe()
         if op == "calibration.get":
-            return self.calibration.describe()
+            return self.calibration.profile().describe()
         if op == "status":
             return self.status()
         if op == "device.status":
@@ -242,6 +303,16 @@ class Observer:
             return self.track_set(args)
         if op == "track.mode":
             return self.track_mode(args)
+        if op == "framing.set":
+            return self.framing_set(args)
+        if op in ("look.stop", "look.nudge", "look.status"):
+            return self.look(op, args)
+        if op == "capture.photo":
+            return self.service.capture_photo(timeout=float(args.get("timeout", 2.0)))
+        if op == "record.start":
+            return self.service.record_start(fps=float(args.get("fps", 30.0)))
+        if op == "record.stop":
+            return self.service.record_stop()
         if op in ("ai.select_biggest", "ai.select_central"):
             self._require_control()
             self._require_legacy()
@@ -255,23 +326,22 @@ class Observer:
             if not response.get("ok"):
                 raise RuntimeError(response.get("error", f"{op} rejected"))
             return response.get("result", {})
-        if op in ("ai.control.get", "ai.control.set"):
+        if op == "ai.control.get":
             self._require_control()
             self._require_legacy()
             response = self._call(op, args)
             if not response.get("ok"):
-                raise RuntimeError(response.get("error", f"{op} rejected"))
+                raise RuntimeError(response.get("error", "ai.control.get rejected"))
             return response.get("result", {})
-        if op == "framing.set":
-            return self.framing_set(args)
-        if op in ("look.stop", "look.nudge", "look.status"):
-            return self.look(op, args)
-        if op == "capture.photo":
-            return self.service.capture_photo(timeout=float(args.get("timeout", 2.0)))
-        if op == "record.start":
-            return self.service.record_start(fps=float(args.get("fps", 30.0)))
-        if op == "record.stop":
-            return self.service.record_stop()
+        if op == "ai.control.set":
+            self._require_control()
+            self._require_legacy()
+            if not self.allow_control_writes:
+                raise RuntimeError("ai.control.set disabled by default; restart with --allow-control-writes")
+            response = self._call(op, args)
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", "ai.control.set rejected"))
+            return response.get("result", {})
         raise ValueError("unsupported observer op")
 
 
@@ -297,6 +367,8 @@ def _emit(result: dict) -> None:
 def _execute(observer: "Observer", request: dict) -> dict:
     try:
         return {"ok": True, "op": request.get("op"), "result": observer.handle(request)}
+    except ReobserveRequired as exc:
+        return {"ok": False, "op": request.get("op"), "error": str(exc), "code": "REOBSERVE_REQUIRED"}
     except Exception as exc:
         return {"ok": False, "op": request.get("op"), "error": str(exc)}
 
@@ -367,8 +439,10 @@ def run_observer(args) -> int:
                 opened = bridge.request("device.open", {"sn": serial})
                 if not opened.get("ok"):
                     raise RuntimeError(opened.get("error", "device.open failed"))
-            observer = Observer(service, bridge, trace, control=args.allow_control,
-                                legacy=args.allow_legacy_probes, conflicts=conflicts)
+            calibration = CalibrationStore(Path(args.out) / "calibration")
+            observer = Observer(service, bridge, trace, calibration=calibration, control=args.allow_control,
+                                legacy=args.allow_legacy_probes, conflicts=conflicts,
+                                allow_control_writes=getattr(args, "allow_control_writes", False))
             server = StatusServer(args.trace, args.port, preview=service.preview_jpeg, overlay=observer.overlay)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()

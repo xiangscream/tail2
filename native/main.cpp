@@ -19,6 +19,24 @@
 #endif
 namespace j = boost::json;
 using Clock = std::chrono::steady_clock;
+namespace {
+struct ControlParam { int para; const char *name; char kind; double lo; double hi; };
+const ControlParam kControlParams[] = {
+  {0,"motion",'b',0,1},{1,"fore_track",'b',0,1},{2,"composition",'b',0,1},
+  {3,"tracker_type",'i',0,1},{4,"gim_ctrl_mode",'i',0,1},{5,"gim_ctrl_speed_mode",'i',0,100},
+  {6,"pan_gain_adaptive",'b',0,1},{7,"pan_gain_value",'f',-1000,1000},
+  {8,"pan_locked",'b',0,1},{9,"pitch_gain_adaptive",'b',0,1},{10,"pitch_gain_value",'f',-1000,1000},
+  {11,"pitch_locked",'b',0,1},{12,"auto_zoom_customized",'i',0,100},{13,"auto_zoom_mode",'i',0,100},
+  {14,"offset_adaptive_x",'b',0,1},{15,"offset_x",'f',-1,1},
+  {16,"offset_adaptive_y",'b',0,1},{17,"offset_y",'f',-1,1},
+  {18,"limit_auto_selection",'b',0,1},{19,"limit_pan_min",'f',-180,180},{20,"limit_pan_max",'f',-180,180},
+  {21,"limit_pitch_min",'f',-90,90},{22,"limit_pitch_max",'f',-90,90},{23,"auto_zoom_speed",'i',1,10},
+};
+const ControlParam *find_control(int para) {
+  for (const auto &spec : kControlParams) if (spec.para == para) return &spec;
+  return nullptr;
+}
+}
 static std::atomic<unsigned long long> status_count{0};
 static std::atomic<long long> status_received_ms{0};
 static long long now_ms() {
@@ -236,20 +254,26 @@ public:
             checked_rc(call("aiSetAiAutoZoomR",[&]{return dev_->aiSetAiAutoZoomR(on);}));
         } else if(op=="ai.control.get") {
             compatibility();
+            const int pt=static_cast<int>(num(a,"para",0,1000));
+            const ControlParam *spec=find_control(pt);
+            if(!spec) throw std::runtime_error("para not in documented Tail2 control allowlist");
             auto target=static_cast<Device::DevControlTargetType>(static_cast<int>(num(a,"target_type",0,2)));
-            auto para=static_cast<Device::DevControlParaType>(static_cast<int>(num(a,"para",0,100)));
-            const std::string kind = a.if_contains("kind") ? str(a,"kind") : std::string("float");
-            if(kind=="bool") { bool v=false; checked_rc(call("aiGetControlParaR(bool)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"kind","bool"},{"value",v}}; }
-            if(kind=="int") { int v=0; checked_rc(call("aiGetControlParaR(int)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"kind","int"},{"value",v}}; }
-            float v=0; bool fault=false; checked_rc(call("aiGetControlParaR(float)",[&]{return dev_->aiGetControlParaR(target,para,v,fault);})); return {{"kind","float"},{"value",v},{"fault",fault}};
+            auto para=static_cast<Device::DevControlParaType>(pt);
+            if(spec->kind=='b'){ bool v=false; checked_rc(call("aiGetControlParaR(bool)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"para",pt},{"name",std::string(spec->name)},{"kind","bool"},{"value",v}}; }
+            if(spec->kind=='i'){ int v=0; checked_rc(call("aiGetControlParaR(int)",[&]{return dev_->aiGetControlParaR(target,para,v);})); return {{"para",pt},{"name",std::string(spec->name)},{"kind","int"},{"value",v}}; }
+            float v=0; bool fault=false; checked_rc(call("aiGetControlParaR(float)",[&]{return dev_->aiGetControlParaR(target,para,v,fault);})); return {{"para",pt},{"name",std::string(spec->name)},{"kind","float"},{"value",v},{"fault",fault}};
         } else if(op=="ai.control.set") {
             compatibility();
+            const int pt=static_cast<int>(num(a,"para",0,1000));
+            const ControlParam *spec=find_control(pt);
+            if(!spec) throw std::runtime_error("para not in documented Tail2 control allowlist");
+            const double raw=num(a,"value",spec->lo,spec->hi);
             auto target=static_cast<Device::DevControlTargetType>(static_cast<int>(num(a,"target_type",0,2)));
-            auto para=static_cast<Device::DevControlParaType>(static_cast<int>(num(a,"para",0,100)));
-            const std::string kind = a.if_contains("kind") ? str(a,"kind") : std::string("float");
-            if(kind=="bool") { bool v=boolean(a,"value"); checked_rc(call("aiSetControlParaR(bool)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","bool"},{"value",v}}; }
-            if(kind=="int") { int v=static_cast<int>(num(a,"value",-1000000,1000000)); checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","int"},{"value",v}}; }
-            float v=static_cast<float>(num(a,"value",-1000000,1000000)); checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,v);})); return {{"kind","float"},{"value",v}};
+            auto para=static_cast<Device::DevControlParaType>(pt);
+            if(spec->kind=='b'){ checked_rc(call("aiSetControlParaR(bool)",[&]{return dev_->aiSetControlParaR(target,para,raw!=0.0);})); }
+            else if(spec->kind=='i'){ checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<int>(raw));})); }
+            else { checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<float>(raw));})); }
+            return {{"para",pt},{"name",std::string(spec->name)},{"kind",std::string(1,spec->kind)},{"value",raw}};
         } else if(op=="record.start" || op=="record.stop" || op=="capture.device") {
             auto stream=op=="capture.device" ? Device::DevMediaStreamIdCapture : Device::DevMediaStreamIdRecord;
             auto action=op=="record.stop" ? Device::DevMediaParamOperationStop : Device::DevMediaParamOperationStart;

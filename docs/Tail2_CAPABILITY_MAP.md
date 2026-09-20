@@ -162,7 +162,7 @@ PanMin/Max、PitchMin/Max(float)、PanReverse(bool)、PresetSpeed(float，tail a
 
 ## 14. 真机验证汇总（M0 + M0.5）
 
-- Windows x64 构建 + **59/59 离线测试**（含 native）。
+- Windows x64 构建 + **71/71 离线测试**（含 native）。
 - UVC 单属主 + 固定只读预览页（候选/requested ROI/ai/云台三轴 updated）；agent 读图闭环；`host_uvc` photo = 请求后**新帧** artifact。
 - 云台速度/停止 `[V]`；`gimbalGetAttitudeInfoR` 间歇失败 → last-good/stale。
 - 显式变焦 `[V]`；景别/自动变焦 `[A]` 弱。

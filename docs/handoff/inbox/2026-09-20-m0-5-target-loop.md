@@ -17,11 +17,11 @@
 - `status.py`/`status.html`：只读 localhost 页，新增预览、候选框、requested ROI、ai 模式、云台三轴 last-good/stale；`img-src 'self'`、no-store、loopback。
 - `__main__.py`：新增 `observe` 子命令。
 
-native 探针新增 op：`target.select(box|center|largest|clicked)`、`ai.select_biggest/central`、`ai.track_mode`、`zoom.set/get/range`、`ai.auto_zoom`、`ai.control.get/set`。
+native 探针新增 op：`target.select(box|center|largest|clicked)`、`ai.select_biggest/central`、`ai.track_mode`、`zoom.set/get/range`、`ai.auto_zoom`、`ai.control.get/set`（**文档化 allowlist + 每参数类型/范围，去掉了 ±1e6**）。
 
 文档：`docs/Tail2_CAPABILITY_MAP.md`（Tail2 能力底座，供 M1 原语层）。
 
-测试：**62 项全部通过**（Python + 6 native）。Windows x64 Release + MSVC 19.44 + SDK 10.0.26100。
+测试：**71 项全部通过**（Python + 6 native）。Windows x64 Release + MSVC 19.44 + SDK 10.0.26100。
 
 ## 2. 真机结果
 
@@ -73,3 +73,17 @@ native 探针新增 op：`target.select(box|center|largest|clicked)`、`ai.selec
 - Framing 景别：**SDK accepted，视觉弱**。
 - Target/Track：**选框 accepted；跟踪依赖设备端开关，SDK 单独选框未证实可启动**。
 - 媒体/预置/候选：**indeterminate / len=0 / UNKNOWN**。
+
+## 6. PR #6 review 修复（本轮追加）
+按 review 修正四个阻断项：
+
+1. **Observation/Candidate/Target 严格绑定同一帧**：新增 `observations.py`（`ObservationStore`/`ObservationRecord`/`ObservedCandidate`/`ReobserveRequired`）；`ObservationService.snapshot()` 现在**在快照那一帧上同步计算候选**（`candidate_frame_seq == frame_seq`）；`target.select` 必须携带 `observation_id`（或 `candidate_id`），下发前校验 `stream_session / camera_epoch / freshness / calibration_id / candidate 归属`，否则返回 `REOBSERVE_REQUIRED`，**不再“收到命令再拍一张”**。
+2. **标定不可自证**：新增 `CalibrationStore`；`calibration.profile` 只设置参数且永远 `verified=false`；`calibration.sample` 必须引用真实 `observation_id`（左/中/右/上/中/下）；`calibration.verify` 只有样本齐全才置 verified 并持久化到 `.local/service/calibration/`；`camera_epoch` 变化自动失效。
+3. **`ai.control` allowlist**：native 建立 `DevControlParaType` 文档化表（para/name/kind/range），`ai.control.get` 仅允许 0–23 文档参数，`ai.control.set` 按参数类型与范围收紧（去掉 ±1e6）；观察器**默认禁用 `ai.control.set`**，需 `--allow-control-writes`。
+4. **文档测试数统一**：能力地图 §14 与报告统一为 **71/71**。
+5. 附加：UVC 重连 bump `camera_epoch` 时清空 candidate；观察器在 epoch 变化时使标定失效并清空 requested ROI。
+
+## 7. 下一轮（按 Issue #4 窄实验）
+- 只读 `ai.control` dump（Human, para 0–23）在 `Normal` 与设备手势 `Track` 两态下对比。
+- 四条窄序列：Normal→Box；Normal→Center→Track→Box；Normal→Largest→Track→Box；手势 Track→Box。
+- 之后再按 GET→SET 单参数→观察→restore 的纪律扫构图相关参数。

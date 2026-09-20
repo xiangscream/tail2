@@ -74,6 +74,7 @@ def main() -> int:
     o.add_argument("--gimbal-poll-s", type=float, default=0.0)
     o.add_argument("--allow-control", action="store_true")
     o.add_argument("--allow-legacy-probes", action="store_true")
+    o.add_argument("--allow-control-writes", action="store_true")
     a = p.parse_args()
     try:
         if a.command == "probe":

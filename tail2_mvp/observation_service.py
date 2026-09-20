@@ -265,6 +265,8 @@ class ObservationService:
             self._reconnects += 1
             self._consecutive_errors = 0
             self._last_read_error = None
+            self._candidates = []
+            self._candidate_seq = -1
 
     def _require_latest(self) -> Latest:
         with self._lock:
@@ -287,9 +289,10 @@ class ObservationService:
             path.write_bytes(self.encoder(latest.frame))
             frame_file = str(path)
         with self._lock:
-            candidates = [dict(c) for c in self._candidates]
-            candidate_seq = self._candidate_seq
+            detector = self.detector
             self._observations += 1
+        candidates = ([dict(c) for c in detector(latest.frame, latest.width, latest.height)]
+                      if detector else [])
         age = self.clock() - latest.received_mono
         return {"observation_id": observation_id, "stream_session": self.stream_session,
                 "camera_epoch": self.camera_epoch, "frame_seq": latest.seq,
@@ -297,8 +300,9 @@ class ObservationService:
                 "received_mono": latest.received_mono, "age_s": age,
                 "fresh": age <= self.max_frame_age_s, "source": self.source.describe(),
                 "frame_file": frame_file, "candidates": candidates,
-                "candidate_seq": candidate_seq, "provider": "host_detector" if self.detector else None,
-                "note": "host receipt time is not sensor exposure time"}
+                "candidate_frame_seq": latest.seq,
+                "provider": "host_detector" if detector else None,
+                "note": "candidates are computed on this exact frame; host receipt time is not sensor exposure time"}
 
     def capture_photo(self, *, timeout: float = 2.0) -> dict:
         if timeout <= 0:

@@ -194,41 +194,107 @@ class ServiceTests(unittest.TestCase):
 
 
 class ObserverTests(unittest.TestCase):
-    def make(self, control=True):
-        from tail2_mvp.calibration import RoiCalibration
+    def make(self, control=True, verified=True):
+        from tail2_mvp.calibration import CalibrationStore
         from tail2_mvp.observer import Observer
 
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        service = ObservationService(FakeSource(), Path(temp.name), encoder=encoder, writer_factory=FakeWriter)
+        detector = lambda frame, width, height: [
+            {"candidate_id": "p1", "class": "human", "bbox": [0.1, 0.2, 0.4, 0.9], "provider": "test"}]
+        service = ObservationService(FakeSource(), Path(temp.name), encoder=encoder,
+                                     writer_factory=FakeWriter, detector=detector)
         service.start()
         self.addCleanup(service.stop)
         trace = Trace(Path(temp.name) / "trace")
         self.addCleanup(trace.close)
         bridge = FakeBridge()
-        observer = Observer(service, bridge, trace, control=control, legacy=True,
-                            calibration=RoiCalibration("cal", verified=True))
+        store = CalibrationStore(Path(temp.name) / "cal")
+        store.set_profile(calibration_id="cal", camera_epoch=service.camera_epoch)
+        if verified:
+            for position in ("left", "center", "right", "top", "middle", "bottom"):
+                store.add_sample(position, "seed", 0.5, 0.5)
+            store.verify()
+        observer = Observer(service, bridge, trace, control=control, legacy=True, calibration=store)
         return observer, bridge
 
-    def test_target_select_maps_roi(self):
+    def test_target_select_requires_observation(self):
+        from tail2_mvp.observations import ReobserveRequired
+
+        observer, _ = self.make()
+        with self.assertRaises(ReobserveRequired):
+            observer.handle({"op": "target.select", "args": {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
+
+    def test_target_select_maps_roi_from_observation(self):
         observer, bridge = self.make()
-        result = observer.handle({"op": "target.select", "args": {"x1": 0.1, "y1": 0.2, "x2": 0.4, "y2": 0.9}})
+        snap = observer.handle({"op": "snapshot"})
+        result = observer.handle({"op": "target.select", "args": {
+            "observation_id": snap["observation_id"], "x1": 0.1, "y1": 0.2, "x2": 0.4, "y2": 0.9}})
         self.assertEqual(result["requested_roi_sdk"], [0.1, 0.2, 0.4, 0.9])
         self.assertIn("UNVERIFIED", result["side_effects"])
         self.assertEqual(bridge.calls[-1][0], "target.select")
         self.assertEqual(bridge.calls[-1][1]["x2"], 0.4)
 
+    def test_candidate_ref_uses_observed_bbox(self):
+        observer, _ = self.make()
+        snap = observer.handle({"op": "snapshot"})
+        result = observer.handle({"op": "target.select", "args": {
+            "observation_id": snap["observation_id"], "candidate_id": "p1"}})
+        self.assertEqual(result["requested_roi"], [0.1, 0.2, 0.4, 0.9])
+
+    def test_unknown_candidate_rejected(self):
+        from tail2_mvp.observations import ReobserveRequired
+
+        observer, _ = self.make()
+        snap = observer.handle({"op": "snapshot"})
+        with self.assertRaises(ReobserveRequired):
+            observer.handle({"op": "target.select", "args": {
+                "observation_id": snap["observation_id"], "candidate_id": "nope"}})
+
+    def test_epoch_change_invalidates_reference(self):
+        from tail2_mvp.observations import ReobserveRequired
+
+        observer, _ = self.make()
+        snap = observer.handle({"op": "snapshot"})
+        observer.service.camera_epoch += 1
+        with self.assertRaises(ReobserveRequired):
+            observer.handle({"op": "target.select", "args": {
+                "observation_id": snap["observation_id"], "x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
+
     def test_target_select_requires_control(self):
         observer, _ = self.make(control=False)
+        snap = observer.handle({"op": "snapshot"})
         with self.assertRaises(RuntimeError):
-            observer.handle({"op": "target.select", "args": {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
+            observer.handle({"op": "target.select", "args": {
+                "observation_id": snap["observation_id"], "x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
 
     def test_unverified_calibration_blocks_selection(self):
-        observer, _ = self.make()
-        from tail2_mvp.calibration import RoiCalibration
-        observer.calibration = RoiCalibration.unverified()
+        observer, _ = self.make(verified=False)
+        snap = observer.handle({"op": "snapshot"})
         with self.assertRaises(ValueError):
-            observer.handle({"op": "target.select", "args": {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
+            observer.handle({"op": "target.select", "args": {
+                "observation_id": snap["observation_id"], "x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
+
+    def test_calibration_cannot_self_verify(self):
+        observer, _ = self.make(verified=False)
+        described = observer.handle({"op": "calibration.profile",
+                                     "args": {"calibration_id": "x", "verified": True}})
+        self.assertFalse(described["verified"])
+
+    def test_calibration_verify_requires_samples(self):
+        observer, _ = self.make(verified=False)
+        with self.assertRaises(ValueError):
+            observer.handle({"op": "calibration.verify"})
+        snap = observer.handle({"op": "snapshot"})
+        for position in ("left", "center", "right", "top", "middle", "bottom"):
+            observer.handle({"op": "calibration.sample", "args": {
+                "position": position, "observation_id": snap["observation_id"], "candidate_id": "p1"}})
+        self.assertTrue(observer.handle({"op": "calibration.verify"})["verified"])
+
+    def test_ai_control_set_disabled_by_default(self):
+        observer, _ = self.make()
+        with self.assertRaises(RuntimeError):
+            observer.handle({"op": "ai.control.set", "args": {"para": 2, "value": 1}})
 
     def test_gimbal_last_good_and_stale(self):
         observer, bridge = self.make()
@@ -247,6 +313,38 @@ class ObserverTests(unittest.TestCase):
         overlay = observer.overlay()
         self.assertIn("not a native device tracking box", overlay["notes"][0])
         self.assertIsNone(overlay["requested_roi"])
+
+
+class ObservationStoreTests(unittest.TestCase):
+    def test_validate_and_membership(self):
+        from tail2_mvp.observations import ObservationRecord, ObservedCandidate, ObservationStore, ReobserveRequired
+
+        store = ObservationStore()
+        record = ObservationRecord("o1", 5, 2, "s1", 100.0, 640, 480, "cal",
+                                   "host_detector", (ObservedCandidate("c1", "human", (0.1, 0.1, 0.2, 0.2), "t"),))
+        store.put(record)
+        self.assertEqual(store.validate("o1", stream_session="s1", camera_epoch=2, now_mono=100.4,
+                                        max_age_s=1, calibration_id="cal").observation_id, "o1")
+        self.assertEqual(record.candidate("c1").candidate_id, "c1")
+        with self.assertRaises(ReobserveRequired):
+            store.validate("o1", stream_session="s2", camera_epoch=2, now_mono=100.4, max_age_s=1, calibration_id="cal")
+        with self.assertRaises(ReobserveRequired):
+            store.validate("o1", stream_session="s1", camera_epoch=3, now_mono=100.4, max_age_s=1, calibration_id="cal")
+        with self.assertRaises(ReobserveRequired):
+            store.validate("o1", stream_session="s1", camera_epoch=2, now_mono=200.0, max_age_s=1, calibration_id="cal")
+        with self.assertRaises(ReobserveRequired):
+            store.validate("o1", stream_session="s1", camera_epoch=2, now_mono=100.4, max_age_s=1, calibration_id="other")
+        with self.assertRaises(ReobserveRequired):
+            record.candidate("missing")
+
+    def test_capacity_eviction(self):
+        from tail2_mvp.observations import ObservationRecord, ObservationStore
+
+        store = ObservationStore(capacity=1)
+        store.put(ObservationRecord("a", 1, 0, "s", 0.0, 1, 1, "c", None))
+        store.put(ObservationRecord("b", 2, 0, "s", 0.0, 1, 1, "c", None))
+        self.assertIsNone(store.get("a"))
+        self.assertIsNotNone(store.get("b"))
 
 
 class FakeBridge:
