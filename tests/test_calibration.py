@@ -57,41 +57,51 @@ class CalibrationTests(unittest.TestCase):
 class CalibrationStoreTests(unittest.TestCase):
     IDENTITY = {"left": (0.2, 0.5), "center": (0.5, 0.5), "right": (0.8, 0.5),
                 "top": (0.5, 0.2), "middle": (0.5, 0.5), "bottom": (0.5, 0.8)}
+    ROI = {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}
 
-    def seed(self, store, mapping):
-        for position, (x, y) in mapping.items():
-            store.add_sample(position, "obs", x, y)
+    def seed(self, store, geometry=None, outcomes=True):
+        for position, (x, y) in (geometry or self.IDENTITY).items():
+            store.add_geometry_sample(position, "obs", x, y)
+        for position in ("left", "center", "right", "top", "middle", "bottom"):
+            store.record_outcome(position, "obs", [0.1, 0.1, 0.2, 0.2], self.ROI, outcomes)
 
-    def test_derives_identity(self):
+    def test_verify_requires_sdk_outcomes(self):
         store = CalibrationStore()
         store.set_profile(calibration_id="c")
-        self.seed(store, self.IDENTITY)
+        for position, (x, y) in self.IDENTITY.items():
+            store.add_geometry_sample(position, "obs", x, y)
+        with self.assertRaises(ValueError):
+            store.verify()  # geometry alone cannot verify
+
+    def test_verify_with_passing_outcomes(self):
+        store = CalibrationStore()
+        store.set_profile(calibration_id="c")
+        self.seed(store)
         profile = store.verify()
         self.assertTrue(profile.verified)
-        self.assertFalse(profile.mirror_x)
-        self.assertEqual(profile.rotation_deg, 0)
+        self.assertEqual(len(profile.outcomes), 6)
 
-    def test_derives_mirror(self):
+    def test_verify_rejects_failed_outcome(self):
         store = CalibrationStore()
         store.set_profile(calibration_id="c")
-        mirrored = dict(self.IDENTITY)
-        mirrored["left"], mirrored["right"] = (0.8, 0.5), (0.2, 0.5)
-        self.seed(store, mirrored)
-        self.assertTrue(store.verify().mirror_x)
+        self.seed(store, outcomes=True)
+        store.record_outcome("right", "obs", [0.1, 0.1, 0.2, 0.2], self.ROI, False, "wrong target")
+        with self.assertRaises(ValueError):
+            store.verify()
 
-    def test_rejects_non_monotonic(self):
+    def test_geometry_sanity_still_checked(self):
         store = CalibrationStore()
         store.set_profile(calibration_id="c")
         bad = dict(self.IDENTITY)
         bad["left"] = (0.6, 0.5)
-        self.seed(store, bad)
+        self.seed(store, geometry=bad)
         with self.assertRaises(ValueError):
             store.verify()
 
     def test_reconnect_invalidates(self):
         store = CalibrationStore()
         store.set_profile(calibration_id="c")
-        self.seed(store, self.IDENTITY)
+        self.seed(store)
         store.verify()
         store.bind_camera_epoch(0)
         store.bind_camera_epoch(1)

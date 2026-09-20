@@ -40,7 +40,7 @@
 | 22 | limit_pitch_max | float | 30.0 | 30.0 |
 | 23 | auto_zoom_speed | int | 1 | 1 |
 
-**结论**：设备端“跟踪开关”是**设备级状态，不暴露在任何 AI 控制参数里**；唯一可观测点是 `aiGetAiStatusR().ai_main_mode`（0↔2，sub_mode 恒 0）。`aiSetAiTrackModeEnabledR` / legacy `aiSetEnabledR` 均不改变它。→ M1 的 `Track` 原语必须以 `aiGetAiStatusR`（或设备事件）为准，不能读控制参数。
+**结论**：0–23 的结果只支持：**本轮测试的 `DevControlParaType` 里没有 Track 状态差异**。设备端“跟踪开关”未暴露在这组控制参数中；**当前已验证的 canonical readback 是 `aiGetAiStatusR().ai_main_mode`（0↔2，sub_mode 恒 0）**。`aiSetAiTrackModeEnabledR` / legacy `aiSetEnabledR` 均不改变它。事件等其它状态接口未穷尽，不排除存在其它来源。→ M1 的 `Track` 原语以当前已验证的 canonical readback 为准。
 
 其余两态共用基线：速度档 3（Fast）、增益 0.5、auto_zoom_customized=1、auto_zoom_mode=0、auto_zoom_speed=1、pan 限 ±100、pitch 限 ±30、各锁/偏移关。
 
@@ -79,27 +79,43 @@
    - `Track` 状态只信 `aiGetAiStatusR`。
 5. 设备在一次服务结束后会自动回到 Normal（操作者观察），即 **Track 状态不跨会话稳定保持**，不能假设复用。
 
-## 4. 真实几何标定（identity，已验证）
+## 4. 标定：mapping hypothesis + SDK selection outcome（已重做）
 
-按 review 约束把标定验收升级为**从样本自动推导镜像/旋转并强制单调**（`CalibrationStore.verify`），随后做真机 6 点采样（操作者按**图像坐标**就位，避免左右主观参照）：
+**旧逻辑的问题（PR #7 review 指出）**：六个样本的 x/y 都来自 UVC 图、标签也按 UVC 图命名，`left<center<right` 只证明“UVC 自身按标签单调”，天然推出 `mirror_x=false`，没有 SDK 侧观测参与；SDK ROI 若水平镜像，旧代码仍可能给出 identity。已废弃“由 UVC 样本推导 transform”。
 
-| 样本 | 图像 x | 图像 y |
-|---|---|---|
-| left | 0.169 | 0.479 |
-| center | 0.487 | 0.449 |
-| right | 0.817 | 0.506 |
-| top | 0.491 | 0.175 |
-| middle | 0.510 | 0.476 |
-| bottom | 0.501 | 0.811 |
+**新逻辑（已实现）**：
+1. `calibration.profile` 先声明 **hypothesis**（identity / mirror / rotation / crop / zoom），且永远 `verified=false`。
+2. `calibration.validate {position}`：确保进入 Track（必要时 `Center/Largest`）→ 等 `ai_main_mode=2` → **REOBSERVE** → 用 hypothesis 计算 ROI → 下发 `Box` → 采样目标位移，返回实际 `uvc_bbox` 与 `sdk_roi`。
+3. `calibration.outcome {position, observation_id, uvc_bbox, sdk_roi, selected}`：记录**实际下发 ROI** 与**设备是否选中该位置对应的目标**（视觉/操作者确认）。
+4. `calibration.verify`：**六个位置 outcome 全 PASS** 才 `verified`；UVC 六点仅作 geometry sanity（单调检查），**不再决定 mirror/rotation**。
+5. `camera_epoch` 变化、profile 变更即失效重标。
 
-- 横向 left<center<right → **mirror_x=false**；纵向 top<middle<bottom → **rotation_deg=0**；crop=null，zoom=1.0。
-- 结论：**UVC 归一化坐标与 Tail2 SDK ROI 同向同原点（identity）**。
-- 结合 Sequence B（Box 在该标定下跟对目标），ROI 坐标契约这次是**真实标定 + SDK 选中结果**，不再是自证。
-- profile 持久化于 `.local/service/calibration/tail2-A-640x480.json`（本地）。
+**现场几何 sanity（UVC 坐标，保留）**：left(0.169,0.479)、center(0.487,0.449)、right(0.817,0.506)、top(0.491,0.175)、middle(0.510,0.476)、bottom(0.501,0.811)。
 
-验收规则（已实现）：`calibration.profile` 永远 `verified=false`；`verify` 只有在六点齐全、且横向/纵向都单调（分离 >0.05）时才置真，并据样本推导 mirror/rotation；`camera_epoch` 变化即失效。
+**identity hypothesis + SDK 选中结果验证**：本轮尚未逐点下发验证（需现场逐点 Box + 视觉确认），因此当前 `identity` 记为 **STRONG CANDIDATE**，不是 VERIFIED；`calibration.verify` 在跑完六点 SDK outcome 前会拒绝置真。Sequence B 只支持“该场景下 identity 的一次 Box 选对”，不足以单独升级为 VERIFIED。
 
-## 5. 注意与待收紧
+## 5. M1 Target/Track 流程（必须遵守）
+
+`Center/Largest` 会先接管云台（Sequence B 实测 yaw −0.93→−6.75），进入 Track 前的 Observation bbox 可能失效。Adapter **不得**把 `Center/Largest → Box` 隐藏成无重观察的原子调用。
+
+正确 runtime：
+
+```text
+Observation A
+  → Agent 想选目标 X
+  → 若处于 Normal：enter Track runtime (Center/Largest)
+  → 等 ai_main_mode=2 / 视角稳定
+  → REOBSERVE (Observation B)
+  → 在 B 上重新 ground 同一语义目标 X
+  → Box(B)
+  → verify follow
+
+若设备已是 Track：直接对当前 frame-bound Observation 下发 Box。
+```
+
+探针已据此收紧：`target.select(Box)` 在未处于 Track（`ai_main_mode != 2`）时**直接拒绝**并提示“enter Track → 等 mode=2 → REOBSERVE → Box”；进入 Track 用 `track.enter`。
+
+## 6. 注意与待收紧
 
 - 快照帧上的 face 检测**偶发为空**（后台检测器有、同步快照帧没有），本轮空候选时使用 **agent_box fallback**。
 - 状态页 `preview`+`overlay` 仍只是展示，不作为正式 Agent Observation（正式走 frame-bound Observation 原子对象）。

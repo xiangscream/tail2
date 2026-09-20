@@ -158,11 +158,11 @@ PanMin/Max、PitchMin/Max(float)、PanReverse(bool)、PresetSpeed(float，tail a
 
 ## 13. 探针 op 覆盖（native/main.cpp）
 
-`hello / device.list / device.open / device.status / candidates.probe / target.select(box|center|largest|clicked) / target.clear / framing.set / track.set / track.mode(ai.track_mode) / ai.select_biggest / ai.select_central / look.stop / look.nudge / look.status / zoom.set|get|range / ai.auto_zoom / ai.control.get|set / capture.device / record.start|stop / position.list / position.recall / position.save(拒绝) / shutdown`
+`hello / device.list / device.open / device.status / candidates.probe / snapshot / candidates / track.enter / target.select(box 需 Track；center|largest|clicked) / target.clear / framing.set / track.set / track.mode(ai.track_mode) / ai.select_biggest / ai.select_central / look.stop / look.nudge / look.status / zoom.set|get|range / ai.auto_zoom / ai.control.get（0–23 allowlist，读） / ai.control.set（allowlist + 需 --allow-control-writes） / calibration.profile|sample(geometry)|validate|outcome|verify|get / capture.photo / capture.device / record.start|stop / position.list / position.recall / position.save(拒绝) / shutdown`
 
 ## 14. 真机验证汇总（M0 + M0.5）
 
-- Windows x64 构建 + **71/71 离线测试**（含 native）。
+- Windows x64 构建 + **76/76 离线测试**（含 native）。
 - UVC 单属主 + 固定只读预览页（候选/requested ROI/ai/云台三轴 updated）；agent 读图闭环；`host_uvc` photo = 请求后**新帧** artifact。
 - 云台速度/停止 `[V]`；`gimbalGetAttitudeInfoR` 间歇失败 → last-good/stale。
 - 显式变焦 `[V]`；景别/自动变焦 `[A]` 弱。
