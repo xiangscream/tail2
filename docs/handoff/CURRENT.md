@@ -2,22 +2,53 @@
 
 2026-09-20 · Tail2 Embodied Agent MVP
 
-基线分支：`kickoff/embodied-m0-20260920`。首次代码审查通过前保留 Draft PR，main 不变。
+当前开发基线：`kickoff/embodied-m0-20260920 @ d7249cac464a61882088c062cd11796f0cb1a914`。
 
 ## 已完成
 
-开发计划、能力契约、SDK 静态核对、C++ 真 SDK 编译、M0 探针、UVC 单次观察工具、候选契约测试、只读状态页和离线测试。状态和结果详见 `../VERIFICATION.md`。
+M0 首轮 Windows / 真机 bring-up 已回读并合入 kickoff：
 
-## 尚未完成
+- Windows x64 Release 构建与 29/29 测试通过；
+- Tail2 UVC 枚举和名称级设备绑定通过；
+- UVC Snapshot 可取得；
+- `look.stop`、`track.set(false)` 与小范围 gimbal speed 真机有效；
+- 状态页只读端点通过；
+- 原生候选列表没有找到正式接口；
+- UVC 下机内 Record 不作为 MVP 主路线；
+- Boost.Container Windows autolink 修复已合入。
 
-Windows 构建、USB/UVC 真机测试、原生候选订阅、完整中层 Runtime、视觉 Agent、真实照片/录像结果验证。
+原始脱敏报告：`inbox/2026-09-20-m0-windows.md`。
+
+产品与架构裁决：`../M0_DECISIONS_2026-09-20.md`。
+
+## 当前未通过的核心链
+
+**Target B 仍未完成。**
+
+必须验证：
+
+`UVC Observation → calibrated ROI → target.select(box) → concrete target → Tracking → Framing → new Observation`
+
+现在不能把 Target / Framing 写成 Agent 可用的完成能力。
+
+## 已冻结的下一阶段选择
+
+- Candidate：Host Detector 为主 Provider；Agent bbox 为 fallback。Native candidates 不阻塞项目。
+- Media：MVP 默认 `host_uvc`。观察、photo、record 共享一个 UVC 采集进程。
+- 状态页：允许增加 localhost 预览、候选框、requested ROI、云台 last-good 状态；没有 native 来源时不显示“实时跟踪框”。
+- 单写者：一个 Observation Service 独占 UVC；状态页和 Agent 不再单独打开设备。
+- Position/Preset、device-native media 与 SDK Owner 的 candidate 询问为 P1。
 
 ## 本地 Agent 下一步
 
-按 [M0 操作手册](../M0_RUNBOOK.md) 从只读发现开始，完成同设备控制与图像绑定、坐标映射、停止路径、Box/Framing、媒体模式以及 Preset 适用性核对。原生候选没有文档化路径时保持 UNKNOWN，继续 PC 候选基线。
+执行 M0.5：ROI mapping + Box / Tracking / Framing + 长驻 Observation Service。
 
-**优先回答 UVC 与机内 Record 冲突。** 不静默改网络、不把 UVC 截帧写成机内拍照，不自动写预置，不上传真实图像或 SDK。
+从 kickoff 精确基线开新分支，先读：
 
-本地新分支：`local/m0-hardware`，提交脱敏结果至 `inbox/` 并在 kickoff PR 下回报。代码变化附测试，平台选型或功能收缩交给产品负责人决定。
+1. `docs/M0_DECISIONS_2026-09-20.md`
+2. `docs/CAPABILITY_CONTRACT.md`
+3. 下一轮 GitHub issue
 
-长期事实更新进 SDK_FINDINGS、能力契约和代码；本页只保留当前交接，避免另一套项目真相。
+不要接多模态模型，不开始 Application，不切网络视频路线，不上传真实人物图像。
+
+M0.5 通过后，网页端开始 M1 Capability Runtime 的正式实现与审查。
