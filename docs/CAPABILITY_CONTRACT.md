@@ -1,62 +1,191 @@
-# 能力契约 v0：供 M1/M2 实现
+# 能力契约 v0.2：M0 回读后基线
 
-本文件定义目标接口。当前 M0 的 `probe` 操作名是工程诊断协议，尚未构成可交给模型的完整工具面。只有通过实机验证的能力才进入 Agent 工具列表。
+本文件定义 M1/M2 使用的产品级接口。M0 `probe` 是工程诊断协议，不直接暴露给 Agent。只有真机链路通过的能力才能进入模型工具面。
 
-## 通用请求与结果
+## 1. 通用请求与结果
 
-请求记录 `request_id / task_id / capability / args / observation_id / deadline / caller`。候选相关请求必须引用有效观察；预置相关请求必须声明 `scope=gimbal_only`。
+请求记录：
 
-返回分别记录：
+`request_id / task_id / capability / args / observation_id / deadline / caller`
 
-- `dispatch`：请求接受或拒绝；
-- `execution`：运行、完成、中止、失败、未知；
+返回分开记录：
+
+- `dispatch`：accepted / rejected；
+- `execution`：running / completed / cancelled / failed / indeterminate；
 - `requested`：希望达到的状态；
-- `sdk_reported`：设备接口回读及来源时间；
-- `visual_check`：检查所用图像和结果，未检查保持 null；
-- `artifact`：真实媒体引用、来源、是否 finalized / accessible。
+- `sdk_reported`：设备接口最近一次有效回读、来源时间与 stale；
+- `visual_check`：检查所用 Observation 与结论；
+- `artifact`：真实媒体引用、provider、finalized / accessible；
+- `errors`：查询失败、设备冲突、timeout 等。
 
-`rc=0` 只支持接口层接受结论。超时可能已经发生动作，结果为 indeterminate；不自动重发非幂等命令。查询成功只表示取得查询结果。
+`rc=0` 只表示 SDK 接受请求。非幂等操作 timeout 后结果保持 indeterminate，不自动重试。
 
-M0 已实现请求 ID 关联、去重、局部超时隔离和上述部分数据类型；完整状态机、跨进程取消、资源所有权属于 M1。
+## 2. Observation
 
-## 正式能力面
+### observe.snapshot()
 
-| 组 | 拟提供接口 | 完成与限制 |
-|---|---|---|
-| Observation | observe.snapshot / observe.state | 返回来自明确视频设备的观察与来源时间；不以图像文件存在证明传感器新鲜度 |
-| Target | target.select(candidate_ref) / clear / status | 选择具体对象，检查本帧/坐标/时效；记录绑定请求与观测依据，身份确认不足时 unknown |
-| Track | track.start / stop / status | start 是控制请求；持续 Tracking 保持会话状态。选框可能隐式开启它，由适配器归一化 |
-| Framing | framing.set(full_body, half_body, close_up, normal) / status | 分开配置已应用和实际构图满足；不可达构图明确返回 constrained |
-| Look | look.nudge / look.center / look.stop / status | 显式暂停 Track，有限视线动作，操作结束不自动恢复跟踪；center 待有效 SDK 路径确认 |
-| Capture | capture.photo(provider) | provider=device 或 host_uvc 显式声明；图片能取得后才给可检查 artifact |
-| Record | record.start(provider) / stop / status | start 表示开始；stop 需跟进 finalized；同一 recording_id 贯穿，不能把新快照当录制结果 |
-| Position | position.save(name) / recall(name) / list | Tail2 为云台视角预置，包含内容以实测为准；禁止覆盖别人预置 |
-| Task | task.cancel(task_id) | 禁止后续动作入队，取消正在执行能力并返回实际处置结果 |
-| Stop | device.stop_all | 取消编排、停止跟踪和云台、明确处理正在录制的任务；不能等模型、不能假定断进程即可停设备 |
-| Status | status.get | 返回有来源/时刻的状态，明确 unknown、stale、unsupported |
+返回一个 Observation：
 
-## 三个必须兑现的边界
+- `observation_id`
+- `stream_session`
+- `camera_epoch`
+- 图像尺寸与方向
+- host received time
+- source / backend
+- calibration version
+- candidate set（若当前 Provider 已运行）
 
-### 目标区域
+M1 的 Observation Service 是 Tail2 UVC 的唯一读取者。Agent、候选检测、host_uvc 媒体和状态页消费同一条流。
 
-候选框采用未镜像的源帧归一化坐标 `[x1,y1,x2,y2]`，必须与其 observation_id 绑定。SDK 采用同样归一化形式不代表视场也自动相同；先完成转换校验。镜像、竖屏、裁切或视角改变后使旧候选失效。
+host received time 不等于相机曝光时间。镜像、旋转、裁切、变焦、重连和 camera epoch 变化都会使旧坐标失效。
 
-本仓库 `selection_request()` 检查格式、来源、epoch、时效和 calibration 标记。它不提供候选检测精度、跨帧身份关联或相机曝光时间保证。M0 工程选框绕过正式候选管理，仅允许人工台架探测。
+## 3. Candidate 与 Target
 
-### 视线所有权
+Candidate Provider 优先级：
 
-Track 与 Manual Look 共用云台。MVP 使用一次只有一个视线控制者的规则：手动操作先停 Track，恢复由显式 start 发起；Framing 的期望保留、当前是否实现分开显示。M0 只发送相应 SDK 请求，实际切换由真机观察验证。
+1. `host_detector`：MVP 主 Provider；
+2. `agent_box`：显式 fallback；
+3. `native_candidates`：当前 SDK 没有可用正式接口，不进入关键路径。
 
-### Capture / Record 来源
+Candidate 结构：
 
-用户希望保留内容，适配器必须明确实际保存地点。UVC 快照已经可以保存在 PC；它是观察文件，尚不等于 `capture.photo` 的最终实现。机内拍照触发与文件取回需单独验证。手册指出 UVC 与机内录像互斥，因此 host_uvc 录像是待确认的替代 Provider，不自动实施。
+`candidate_id / observation_id / class / bbox / provider / confidence? / provider_metadata?`
 
-## 中断策略
+candidate_id 只在当前 Observation / CandidateSet 内有效，不代表跨帧身份。
 
-M1 对每个任务拥有独立取消令牌、排队动作和状态。取消只停止本任务持有的动作；紧急停止可撤销所有主动任务。持续 SDK 调用应有可执行的中止路径。同步 native 调用卡住时，主机可以隔离进程，但物理状态必须报告未知并提示现场处理。
+### target.select(candidate_ref)
 
-M0 的 `look.nudge` 在 SDK 调用正常返回后发送零速；没有独立硬件看门狗保证，不能无人运行。长任务不交给 M0 JSONL 直接执行。
+选择画面里的具体对象。进入 SDK 前必须验证：
 
-## 向 Agent 暴露的内容
+- observation 仍在 freshness window；
+- camera_epoch 一致；
+- calibration 已验证；
+- bbox 合法；
+- provider 受允许。
 
-工具提供用途、参数、前提、状态与结果；不暴露 SDK 函数、任意执行入口、序列号和本地私密路径。只向已授权模型发送选定图像；记录传输目的、模型配置和任务预算。画面里的文字、二维码和场景内容按观察数据处理，不授权额外设备动作。
+Tail2 adapter 把 Candidate bbox 转成 `aiSetSelectedTargetR(Box)` 所需 ROI。UVC → SDK ROI 转换必须经过 M0.5 实机标定。
+
+选框是否会自动开启 Tracking 或改变 Zoom 是硬件副作用，M0.5 真机结果出来后由 adapter 归一化并写回状态。
+
+### target.clear()
+
+清除设备当前选定目标。Runtime 中保留的历史 candidate 立即失效。
+
+## 4. Track
+
+### track.start() / track.stop() / track.status()
+
+Track 表示 Tail2 的持续目标跟随。
+
+如果设备的 `target.select` 天然开启 Tracking，Runtime 仍保持 Target 与 Track 两个产品语义，并把设备副作用记录为 `sdk_reported.side_effects`。若无法实现“已选目标但不跟踪”，状态必须说明 provider limitation。
+
+Track stop 的真机停止路径已通过首轮 M0；持续任务完成与一次 stop 请求接受仍然分开记录。
+
+## 5. Framing
+
+### framing.set(full_body | half_body | close_up | normal)
+
+`requested` 记录用户期望构图。SDK 配置回读不代表视觉构图已经满足。
+
+完成状态至少分：
+
+- `applied`：SDK 接受配置；
+- `visually_satisfied`：新的 Observation 满足目标；
+- `constrained`：受视场、目标距离或设备能力限制；
+- `unknown`：没有足够视觉结果。
+
+M0.5 必须完成 Full / Half / Close 的真机闭环，之后才进入 Agent 工具面。
+
+## 6. Look 与控制权
+
+### look.nudge() / look.stop() / look.status()
+
+MVP 使用单一 Look Owner：
+
+- Tracking 持有 Look 时，Manual Look 先停止 Tracking；
+- Manual Look 完成后不自动恢复 Tracking；
+- 恢复需要显式 `track.start` 或重新选择目标。
+
+首轮 M0 已验证有限 gimbal speed 和 stop 在当前 Tail2 固件可用。角度查询有间歇失败，因此 `look.status` 返回 last-good value、source time、age 和 stale；单次错误不会把角度改成 0。
+
+## 7. Capture 与 Record
+
+MVP 默认 Provider 为 **host_uvc**。
+
+### capture.photo(provider=host_uvc)
+
+从共享 UVC 流中取得请求发生之后的新帧，保存成持久 artifact。返回：
+
+`media_id / provider=host_uvc / path_ref / captured_observation_id / finalized / accessible`
+
+它与 `observe.snapshot` 的差别是持久结果与任务语义。不能把请求前的旧 Observation 复制成“新照片”。
+
+### record.start(provider=host_uvc)
+
+在共享 UVC 流上建立 recording session。首版只承诺视频，不承诺音频和最终产品编码规格。
+
+### record.stop(recording_id)
+
+停止写入并 flush / finalize，文件可打开后才 completed。主机退出或 writer close 出错时返回 failed / indeterminate。
+
+device-native Capture / Record 保留为实验 Provider，当前不进入 Agent 默认工具面。
+
+## 8. Position
+
+### position.save / recall / list
+
+Tail2 上的 Position 仅表示云台视角 Preset。当前设备列表为空，save 尚未获准真机测试，因此 M1 标为 `experimental/unsupported`，不阻塞 Target 主链。
+
+未来确认 ID 所有权、创建、recall 与清理后再进入工具面。
+
+## 9. Task / Stop
+
+### task.cancel(task_id)
+
+阻止本任务后续动作继续派发，并请求取消它拥有的持续能力。
+
+### device.stop_all()
+
+本地最高优先级停止：
+
+- cancel 当前编排；
+- stop Tracking；
+- send zero gimbal speed；
+- stop/finalize 活跃 host_uvc recording。
+
+它不依赖模型返回。超时后设备物理状态保持 unknown，并提示现场检查。停止不自动清除历史 Target 语义；设备是否仍保留具体目标由状态回读决定。
+
+## 10. Status
+
+### status.get()
+
+返回有来源时间的聚合状态，包括：
+
+- device connection / readiness；
+- target requested / sdk state / unknown；
+- track state；
+- framing requested / visual result；
+- look owner 与 last-good gimbal attitude；
+- media session；
+- task state；
+- stale / unsupported / provider limitation。
+
+设备 discovery 使用 bounded polling + total timeout，不依赖固定 3 秒 sleep。只有显式 Tail2 UVC 设备进入 ready。
+
+## 11. 状态页
+
+页面只读、localhost、no-store。M1 可显示：
+
+- 最新预览；
+- Candidate boxes；
+- requested target ROI；
+- gimbal last-good angle + stale；
+- Capability / SDK / Result timeline。
+
+当前没有 native tracking bbox，页面不得把 Candidate 或 requested ROI 标成设备实时跟踪框。真实图像不写公开 trace。
+
+## 12. 向 Agent 暴露的内容
+
+Agent 只看到正式能力、当前状态、允许的 Observation 和结果。它看不到 SDK 函数、任意命令执行、序列号、本地私密路径和未验证的实验能力。
+
+M2 的多模态 Agent 负责：看图、语义选候选、组织能力、根据视觉结果继续 / 重试 / 完成。Tail2 保持高频 Tracking / Gimbal 闭环。
