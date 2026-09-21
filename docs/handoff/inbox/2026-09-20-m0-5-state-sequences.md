@@ -87,12 +87,12 @@
 1. `calibration.profile` 先声明 **hypothesis**（identity / mirror / rotation / crop / zoom），且永远 `verified=false`。
 2. `calibration.validate {position}`：确保进入 Track（必要时 `Center/Largest`）→ 等 `ai_main_mode=2` → **REOBSERVE** → 用 hypothesis 计算 ROI → 下发 `Box` → 采样目标位移，返回实际 `uvc_bbox` 与 `sdk_roi`。
 3. `calibration.outcome {position, observation_id, uvc_bbox, sdk_roi, selected}`：记录**实际下发 ROI** 与**设备是否选中该位置对应的目标**（视觉/操作者确认）。
-4. `calibration.verify`：**六个位置 outcome 全 PASS** 才 `verified`；UVC 六点仅作 geometry sanity（单调检查），**不再决定 mirror/rotation**。
+4. `calibration.verify`：`left/right/top/bottom` 四个决定性 SDK selection outcome 全 PASS 才 `verified`；UVC 六点仅作 geometry sanity（单调检查），**不再决定 mirror/rotation**。双目标 target-switch 作为额外因果验证，排除 `Center` 继续跟旧目标的假阳性。
 5. `camera_epoch` 变化、profile 变更即失效重标。
 
 **现场几何 sanity（UVC 坐标，保留）**：left(0.169,0.479)、center(0.487,0.449)、right(0.817,0.506)、top(0.491,0.175)、middle(0.510,0.476)、bottom(0.501,0.811)。
 
-**identity hypothesis + SDK 选中结果验证**：本轮尚未逐点下发验证（需现场逐点 Box + 视觉确认），因此当前 `identity` 记为 **STRONG CANDIDATE**，不是 VERIFIED；`calibration.verify` 在跑完六点 SDK outcome 前会拒绝置真。Sequence B 只支持“该场景下 identity 的一次 Box 选对”，不足以单独升级为 VERIFIED。
+**identity hypothesis + SDK 选中结果验证**：四个决定性位置（left/right/top/bottom）已经记录 SDK selection outcome 并通过 `calibration.verify`；随后又用两个可区分物体做 target-switch，`Box` 右侧目标后云台切向右侧，`Box` 左侧目标后再切回左侧，排除了 `Center` 继续跟旧目标的假阳性。当前 profile 因此为 **identity VERIFIED**（640×480、1x、横向、当前 camera epoch）。详细数值见 §8。
 
 ## 5. M1 Target/Track 流程（必须遵守）
 
