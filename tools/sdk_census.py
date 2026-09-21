@@ -14,14 +14,16 @@ import argparse
 import hashlib
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-HEADERS = (
-    "include/dev/dev.hpp",
-    "include/dev/devs.hpp",
-    "include/util/comm.hpp",
-)
-SAMPLES = ("OBSBOT_Sample/main.cpp",)
+HEADER_SUFFIXES = (".h", ".hpp", ".hh", ".hxx", ".h++", ".inl")
+SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".c++")
+DOC_SUFFIXES = (".md", ".txt", ".rst", ".html", ".htm", ".pdf")
+DOC_NAMES = ("readme", "license", "licence", "changelog", "changes", "notice", "version")
+BINARY_SUFFIXES = (".dll", ".lib", ".so", ".dylib", ".pdb", ".exe", ".a", ".obj", ".exp", ".zip")
+BUILD_SUFFIXES = (".cmake", ".mk", ".pc", ".json", ".xml", ".yml", ".yaml", ".toml", ".cfg")
+BUILD_NAMES = ("cmakelists", "makefile", "meson.build", "package")
+SAMPLE_DIR_HINTS = ("sample", "example", "demo", "app")
 
 DESTRUCTIVE_WORDS = frozenset((
     "format", "delete", "erase", "reset", "rst", "upgrade", "download", "restore",
@@ -306,73 +308,140 @@ def _parse_class(lines: list[tuple[int, str]], index: int, doc: str,
     return entries, consumed
 
 
+def _classify(relative: PurePosixPath) -> str:
+    name = relative.name.lower()
+    suffix = relative.suffix.lower()
+    parents = [part.lower() for part in relative.parts[:-1]]
+    in_sample = any(any(hint in part for hint in SAMPLE_DIR_HINTS) for part in parents)
+    if ".so." in name or (not suffix and any(k in part for part in parents
+                                             for k in ("release", "debug"))):
+        return "binary"
+    if suffix in HEADER_SUFFIXES:
+        return "header"
+    if suffix in SOURCE_SUFFIXES:
+        return "sample_source" if in_sample else "source"
+    if any(key in name for key in BUILD_NAMES) or suffix in BUILD_SUFFIXES:
+        return "build"
+    if suffix in DOC_SUFFIXES or any(key in name for key in DOC_NAMES):
+        return "doc"
+    if suffix in BINARY_SUFFIXES:
+        return "binary"
+    if suffix in BUILD_SUFFIXES:
+        return "build"
+    return "other"
+
+
+def discover(root: Path) -> list[dict]:
+    """Walk the whole SDK root and classify every file. The public surface is
+    discovered, never assumed: the inventory is the proof of what exists."""
+    root = root.resolve()
+    entries: list[dict] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        kind = _classify(relative)
+        entry = {"path": str(relative), "type": kind, "bytes": path.stat().st_size,
+                 "parsed": False, "skip_reason": ""}
+        if kind in ("header", "source", "sample_source", "doc", "build"):
+            entry["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            if kind == "doc":
+                entry["skip_reason"] = "inventory only: proprietary prose is not parsed or copied"
+            elif kind == "build":
+                entry["skip_reason"] = "build metadata: inventoried, not parsed"
+        else:
+            entry["skip_reason"] = "binary artifact" if kind == "binary" else "unclassified"
+        entries.append(entry)
+    return entries
+
+
+def _parse_unit(lines: list[tuple[int, str]], relative: str) -> list[dict]:
+    entries: list[dict] = []
+    index = 0
+    doc = ""
+    while index < len(lines):
+        _, raw = lines[index]
+        comment = _comment_text(raw)
+        if comment is not None:
+            doc = (doc + " " + comment).strip()
+            index += 1
+            continue
+        code = _strip_comment(raw).strip()
+        if code.startswith("enum"):
+            parsed, index = _parse_enum(lines, index, doc, None)
+            entries.append(parsed)
+            doc = ""
+            continue
+        if code.startswith(("struct", "union")) or code.startswith("typedef struct"):
+            parsed, index = _parse_struct(lines, index, doc, None)
+            entries.append(parsed)
+            doc = ""
+            continue
+        if code.startswith("class ") and ";" not in code:
+            parsed, index = _parse_class(lines, index, doc, None)
+            entries.extend(parsed)
+            doc = ""
+            continue
+        index += 1
+    for entry in entries:
+        entry["file"] = relative
+        entry.setdefault("family", "other")
+        entry["risk"] = _risk(entry["name"]) if entry["kind"] in ("function", "callback") else "data"
+    return entries
+
+
+REFERENCE_RE = re.compile(r"\b((?:ai|camera|gimbal|dev|mtp|wifi|bt|upgrade)[A-Z]\w+)\s*\(")
+
+
+def referenced_symbols(text: str) -> list[str]:
+    return sorted(set(REFERENCE_RE.findall(text)))
+
+
 def census(root: Path) -> dict:
     root = root.resolve()
+    inventory = discover(root)
     symbols: list[dict] = []
-    headers: dict[str, dict] = {}
-    for relative in HEADERS + SAMPLES:
-        path = root / relative
-        if not path.exists():
+    files: dict[str, dict] = {}
+    for entry in inventory:
+        if entry["type"] not in ("header", "source", "sample_source"):
             continue
-        raw_bytes = path.read_bytes()
-        text = raw_bytes.decode("utf-8-sig", errors="replace").splitlines()
-        headers[relative] = {"sha256": hashlib.sha256(raw_bytes).hexdigest(),
-                             "lines": len(text)}
-        lines = list(enumerate(text, 1))
-        entries: list[dict] = []
-        index = 0
-        doc = ""
-        while index < len(lines):
-            number, raw = lines[index]
-            text = _comment_text(raw)
-            if text is not None:
-                doc = (doc + " " + text).strip()
-                index += 1
-                continue
-            code = _strip_comment(raw).strip()
-            if code.startswith("enum"):
-                parsed, index = _parse_enum(lines, index, doc, None)
-                entries.append(parsed)
-                doc = ""
-                continue
-            if code.startswith(("struct", "union")) or code.startswith("typedef struct"):
-                parsed, index = _parse_struct(lines, index, doc, None)
-                entries.append(parsed)
-                doc = ""
-                continue
-            if code.startswith("class ") and ";" not in code:
-                parsed, index = _parse_class(lines, index, doc, None)
-                entries.extend(parsed)
-                doc = ""
-                continue
-            index += 1
-        for entry in entries:
-            entry["file"] = relative
-            entry.setdefault("family", "other")
-            if entry["kind"] in ("function", "callback"):
-                entry["risk"] = _risk(entry["name"])
-            elif entry["kind"] == "enum":
-                entry["risk"] = "data"
-            else:
-                entry["risk"] = "data"
-            symbols.append(entry)
+        path = root / entry["path"]
+        text = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+        record = {"sha256": entry["sha256"], "lines": len(text), "type": entry["type"]}
+        if entry["type"] == "header":
+            parsed = _parse_unit(list(enumerate(text, 1)), entry["path"])
+            symbols.extend(parsed)
+            record["parsed"] = True
+            record["symbols"] = len(parsed)
+        else:
+            record["parsed"] = False
+            record["skip_reason"] = "sample source: symbol references extracted, body not parsed"
+            record["referenced_symbols"] = referenced_symbols("\n".join(text))
+        files[entry["path"]] = record
+        entry["parsed"] = record["parsed"]
+        if record.get("skip_reason"):
+            entry["skip_reason"] = record["skip_reason"]
+        if entry["type"] == "header":
+            entry["symbols"] = record["symbols"]
     families: dict[str, int] = {}
     kinds: dict[str, int] = {}
     for entry in symbols:
         families[entry["family"]] = families.get(entry["family"], 0) + 1
         kinds[entry["kind"]] = kinds.get(entry["kind"], 0) + 1
-    return {"package_label": root.name, "headers": headers,
-            "totals": {"symbols": len(symbols), "families": families, "kinds": kinds},
+    by_type: dict[str, int] = {}
+    for entry in inventory:
+        by_type[entry["type"]] = by_type.get(entry["type"], 0) + 1
+    return {"package_label": root.name, "files": files, "inventory": inventory,
+            "totals": {"symbols": len(symbols), "families": families, "kinds": kinds,
+                       "by_type": by_type},
             "symbols": symbols}
 
 
 def summarize(data: dict) -> str:
-    lines = ["# SDK census (sanitized)", "",
-             f"package: {data['package_label']}", ""]
-    for name, info in data["headers"].items():
-        lines.append(f"- `{name}` sha256 `{info['sha256']}` ({info['lines']} lines)")
-    lines += ["", f"symbols: {data['totals']['symbols']}", "",
-              "## kinds", ""]
+    lines = ["# SDK census (sanitized)", "", f"package: {data['package_label']}", "",
+             f"symbols: {data['totals']['symbols']}",
+             "files by type: " + ", ".join(f"{k}={v}" for k, v in sorted(data["totals"]["by_type"].items())),
+             "", "## kinds", ""]
     for kind, count in sorted(data["totals"]["kinds"].items()):
         lines.append(f"- {kind}: {count}")
     lines += ["", "## families", ""]
@@ -381,30 +450,64 @@ def summarize(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _inventory_section(data: dict) -> list[str]:
+    lines = ["", "## Discovery inventory (surface proof)", "",
+             "The scanner walks the whole SDK root instead of a fixed file list, so this",
+             "table is the evidence for what the public surface actually contains.", "",
+             "| type | count |", "|---|---|"]
+    for kind, count in sorted(data["totals"]["by_type"].items()):
+        lines.append(f"| {kind} | {count} |")
+    for group, label in (("header", "Headers (parsed)"),
+                         ("sample_source", "Sample / example sources"),
+                         ("source", "Other sources"),
+                         ("doc", "Docs / readme (inventory only)"),
+                         ("build", "Build metadata")):
+        items = [entry for entry in data["inventory"] if entry["type"] == group]
+        if not items:
+            continue
+        lines += ["", f"### {label}", "", "| path | sha256 (16) | parsed | skip reason |", "|---|---|---|---|"]
+        for entry in items:
+            lines.append(f"| `{entry['path']}` | `{entry.get('sha256', '')[:16]}…` | "
+                         f"{entry.get('parsed', False)} | {entry.get('skip_reason') or '—'} |")
+    binaries = [entry for entry in data["inventory"] if entry["type"] == "binary"]
+    if binaries:
+        aggregates: dict[str, list[int]] = {}
+        for entry in binaries:
+            suffix = PurePosixPath(entry["path"]).suffix.lower() or "(none)"
+            bucket = aggregates.setdefault(suffix, [0, 0])
+            bucket[0] += 1
+            bucket[1] += entry["bytes"]
+        lines += ["", "### Binary artifacts (aggregated, not parsed)", "",
+                  "| suffix | count | total bytes |", "|---|---|---|"]
+        for suffix, (count, total) in sorted(aggregates.items()):
+            lines.append(f"| {suffix} | {count} | {total} |")
+    others = [entry for entry in data["inventory"] if entry["type"] == "other"]
+    if others:
+        lines += ["", "### Other files", "",
+                  "| path | bytes | skip reason |", "|---|---|---|"]
+        for entry in others:
+            lines.append(f"| `{entry['path']}` | {entry['bytes']} | {entry.get('skip_reason') or '—'} |")
+    return lines
+
+
 def sanitized_markdown(data: dict) -> str:
     lines = [
         "# Tail2 SDK Census (sanitized)",
         "",
-        "Generated by `tools/sdk_census.py` from the locally supplied SDK package.",
-        "Contains symbol names, kinds, our risk/applicability classification and enum",
-        "member counts only: no proprietary header bodies or prose.",
+        "Generated by `tools/sdk_census.py`, which **discovers** the SDK surface by walking",
+        "the package root. Contains symbol names, kinds, our risk/applicability",
+        "classification, enum member counts and a file inventory only: no proprietary",
+        "header bodies, sample bodies, docs prose or binaries.",
         "",
         f"- package label: `{data['package_label']}`",
-    ]
-    for name, info in data["headers"].items():
-        lines.append(f"- `{name}` sha256 `{info['sha256']}` ({info['lines']} lines)")
-    lines += [
         f"- symbols: {data['totals']['symbols']}",
         "",
         "Applicability comes from the SDK's own doc comments where they name products",
         "(`tail2`, `tailair`, `tiny`, `meet`, ...); `generic` means the doc does not say.",
         "Presence in the header is **not** evidence that Tail2 firmware accepts or honors it.",
-        "",
-        "## Totals by kind",
-        "",
-        "| kind | count |",
-        "|---|---|",
     ]
+    lines += _inventory_section(data)
+    lines += ["", "## Totals by kind", "", "| kind | count |", "|---|---|"]
     for kind, count in sorted(data["totals"]["kinds"].items()):
         lines.append(f"| {kind} | {count} |")
     lines += ["", "## Totals by family", "", "| family | count |", "|---|---|"]
@@ -416,8 +519,8 @@ def sanitized_markdown(data: dict) -> str:
     for family in sorted(families):
         entries = sorted(families[family], key=lambda item: (item["kind"], item["name"]))
         lines += ["", f"## family: {family}", "",
-                  "| symbol | kind | risk | applicability | size |",
-                  "|---|---|---|---|---|"]
+                  "| symbol | kind | risk | applicability | size | file |",
+                  "|---|---|---|---|---|---|"]
         for entry in entries:
             size = ""
             if entry["kind"] == "enum":
@@ -425,7 +528,7 @@ def sanitized_markdown(data: dict) -> str:
             elif entry["kind"] in ("struct", "union"):
                 size = f"{len(entry.get('fields', []))} fields"
             lines.append(f"| `{entry['name']}` | {entry['kind']} | {entry.get('risk', 'data')} | "
-                         f"{entry['applicability_hint']} | {size} |")
+                         f"{entry['applicability_hint']} | {size} | `{entry.get('file', '')}` |")
     return "\n".join(lines) + "\n"
 
 
@@ -449,7 +552,8 @@ def main() -> int:
     print(summary)
     if args.sanitize:
         print(args.sanitize)
-    print(json.dumps(data["totals"], ensure_ascii=False))
+    print(json.dumps(data["totals"]["by_type"], ensure_ascii=False))
+    print(json.dumps(data["totals"]["kinds"], ensure_ascii=False))
     return 0
 
 

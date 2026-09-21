@@ -148,8 +148,8 @@ class CensusParserTests(unittest.TestCase):
 
     def test_totals_and_hash_recorded(self):
         self.assertGreaterEqual(self.data["totals"]["symbols"], 10)
-        self.assertIn("include/dev/dev.hpp", self.data["headers"])
-        self.assertEqual(len(self.data["headers"]["include/dev/dev.hpp"]["sha256"]), 64)
+        self.assertIn("include/dev/dev.hpp", self.data["files"])
+        self.assertEqual(len(self.data["files"]["include/dev/dev.hpp"]["sha256"]), 64)
 
     def test_summary_contains_no_symbol_prose(self):
         summary = sdk_census.summarize(self.data)
@@ -159,3 +159,66 @@ class CensusParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiscoveryTests(unittest.TestCase):
+    """The scanner must discover the surface, not assume a fixed file list."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        for relative in ("include/dev", "include/extra", "OBSBOT_Sample", "docs",
+                         "linux/x86_64-release", "windows/win64-release"):
+            (root / relative).mkdir(parents=True)
+        (root / "include/dev/dev.hpp").write_text(SYNTHETIC_DEV_HPP, encoding="utf-8")
+        (root / "include/extra/nested.h").write_text("enum ExtraEnum { A, B };\n", encoding="utf-8")
+        (root / "OBSBOT_Sample/main.cpp").write_text(
+            "int main(){ aiSetEnabledR(true); return 0; }\n", encoding="utf-8")
+        (root / "OBSBOT_Sample/CMakeLists.txt").write_text("project(x)\n", encoding="utf-8")
+        (root / "docs/readme.md").write_text("# private notes\n", encoding="utf-8")
+        (root / "linux/x86_64-release/libdev.so.1").write_bytes(b"\x7fELF")
+        (root / "windows/win64-release/libdev.dll").write_bytes(b"MZ")
+        self.data = sdk_census.census(root)
+        self.inv = {entry["path"]: entry for entry in self.data["inventory"]}
+
+    def test_fixed_file_list_is_gone(self):
+        self.assertFalse(hasattr(sdk_census, "HEADERS"))
+        self.assertTrue(hasattr(sdk_census, "discover"))
+
+    def test_nested_header_is_discovered(self):
+        self.assertIn("include/extra/nested.h", self.inv)
+        self.assertEqual(self.inv["include/extra/nested.h"]["type"], "header")
+        self.assertIn("ExtraEnum", {entry["name"] for entry in self.data["symbols"]})
+
+    def test_sample_source_recorded_not_parsed_as_surface(self):
+        entry = self.inv["OBSBOT_Sample/main.cpp"]
+        self.assertEqual(entry["type"], "sample_source")
+        self.assertFalse(entry["parsed"])
+        refs = self.data["files"]["OBSBOT_Sample/main.cpp"]["referenced_symbols"]
+        self.assertIn("aiSetEnabledR", refs)
+        self.assertNotIn("main", {entry["name"] for entry in self.data["symbols"]})
+
+    def test_doc_inventoried_with_hash_and_skip_reason(self):
+        entry = self.inv["docs/readme.md"]
+        self.assertEqual(entry["type"], "doc")
+        self.assertEqual(len(entry["sha256"]), 64)
+        self.assertIn("inventory only", entry["skip_reason"])
+        self.assertNotIn("readme.md", self.data["files"])
+
+    def test_versioned_shared_object_is_binary(self):
+        self.assertEqual(self.inv["linux/x86_64-release/libdev.so.1"]["type"], "binary")
+
+    def test_build_file_classified(self):
+        self.assertEqual(self.inv["OBSBOT_Sample/CMakeLists.txt"]["type"], "build")
+
+    def test_surface_bounded_by_discovery(self):
+        self.assertEqual(self.data["totals"]["by_type"]["header"], 2)
+        self.assertEqual(self.data["totals"]["by_type"]["sample_source"], 1)
+        self.assertEqual(self.data["totals"]["by_type"]["binary"], 2)
+
+    def test_sanitized_inventory_lists_headers_without_prose(self):
+        markdown = sdk_census.sanitized_markdown(self.data)
+        self.assertIn("Discovery inventory", markdown)
+        self.assertIn("include/extra/nested.h", markdown)
+        self.assertNotIn("Only for", markdown)
