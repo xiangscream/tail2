@@ -186,3 +186,5 @@ Safety note: object targets that leave the frame park the device in mode 2 / sub
 and hunt to the gimbal limits (yaw −135°; operator saw the yellow LED). Recovery:
 `target.clear` → `look.stop` → `aiSetGimbalMotorAngleR(0,0)` → `aiSetEnabledR(true)`.
 A watchdog is required before any object-tracking product behaviour.
+
+| `cameraSetPowerCtrlActionR(PowerOff)` | **VERIFIED** | device gone from PnP + SDK list (doc says tail air) |

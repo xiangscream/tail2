@@ -551,6 +551,10 @@ public:
         } else if(op=="iq.wdr.set") {
             compatibility(); const int v=static_cast<int>(num(a,"value",0,4));
             checked_rc(call("cameraSetWdrR",[&]{return dev_->cameraSetWdrR(v);}));
+        } else if(op=="power.ctrl") {
+            compatibility(); const int act=static_cast<int>(num(a,"action",0,4));
+            checked_rc(call("cameraSetPowerCtrlActionR",[&]{return dev_->cameraSetPowerCtrlActionR(
+                static_cast<Device::DevPowerCtrlActionType>(act));}));
         } else if(op=="status.refresh") {
             compatibility(); const bool fast=boolean(a,"fast");
             const int v=static_cast<int>(num(a,"value",0,100000));

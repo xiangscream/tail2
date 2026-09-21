@@ -205,6 +205,7 @@ listed explicitly rather than being guessed as no-ops.
 | `Devices::setDevChangedCallback` | `ACCEPTED_UNPROVEN` | registration | registered; hotplug not exercised |
 | `aiGetLimitedZoneTrack*R` (6 getters) | **UNSUPPORTED_TAIL2** | rc | all rc = −1 |
 | `aiSetLimitedZoneTrack*R` | `evidence_insufficient` | rc | rc = 0 with no readback and no observed effect |
+| `cameraSetPowerCtrlActionR(DevPowerCtrlPowerOff)` | **VERIFIED** | physical | documented `tail air` but powers the Tail2 off: camera disappears from PnP and the SDK list. Reboot/Suspend untested. |
 
 ## 5. Open items handed to Wave B
 
