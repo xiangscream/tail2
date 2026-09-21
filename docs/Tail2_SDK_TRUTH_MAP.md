@@ -40,7 +40,7 @@ in its doc and works.
 | **Native speed + native stop** exist; stop settles to ±0.01° vs legacy ≈0.4° | stop path can be upgraded; native speed pan sign is **inverted** vs legacy |
 | `aiGetGimbalStateR` / `aiGetGimbalParaR` give real Tail2 readback (limits, reverse, euler+motor+velocity) | limits/reverse become enforceable, not guessed |
 | `ai_sub_mode` reflects `aiSetTargetZoomTypeR` | framing *intent* is readback-verifiable even when not visible |
-| `aiSetTargetViewTypeR` and three zoom-family writers return rc=0 and do nothing | must never be promoted on `rc=0`; the runtime needs a no-op detector |
+| `aiSetTargetViewTypeR` and three zoom-family writers return rc=0 with no effect observed | must never be promoted on `rc=0`; the runtime needs per-capability **expected-effect predicates**, not a universal no-op rule |
 | Offset values (15/17) stay 0.0 even under PRO+Track+Composition | "composition offset" is not a Tail2 primitive |
 | No zoom/view getter exists | framing readback stays state-only (`ai_sub_mode`) → `NO_PUBLIC_PATH` for values |
 
@@ -62,7 +62,7 @@ in its doc and works.
 | `aiGetGimbalBootPosR` | tailair+tiny | **READBACK_VERIFIED** | readback | returns id 0, roll/pitch/yaw 0, zoom 1.0 |
 | `aiTrgGimbalBootPosR` | tailair+tiny | `PENDING_WAVE_B` | static | not exercised (gimbal motion to a stored pose) |
 | `aiGetGimbalPresetListR` | tailair+tiny | **READBACK_VERIFIED** | readback | `len=0` — no presets on this device, so preset recall is untestable |
-| `aiSetGimbalYawDirReverseR` | tailair+tiny | **ACCEPTED_UNPROVEN / no observed effect** | rc + readback + visual | rc=0; `PanReverse` readback stayed 0; panning direction unchanged on both the absolute and native-speed paths. Possible reboot requirement — not pursued. |
+| `aiSetGimbalYawDirReverseR` | tailair+tiny | **ACCEPTED_UNPROVEN** (no effect observed under tested preconditions) | rc + readback + visual | rc=0; `PanReverse` readback stayed 0; panning direction unchanged on both the absolute and native-speed paths. Possible reboot requirement — not pursued. |
 | `aiSetGimbalBootPosR`, `aiRstGimbalBootPosR`, `gimbalRstPosR` | tailair+tiny | **DEFERRED_UNSAFE** | static | persistent/factory-reset writes; not exercised |
 | `cameraSetPanTiltAbsolute/Relative` | meet | `NOT_PRODUCT_RELEVANT` | static | other product |
 
@@ -106,10 +106,10 @@ original snapshot was re-read after the sweep and matched.
 
 | symbol | doc applicability | current_truth | evidence | notes |
 |---|---|---|---|---|
-| `aiSetTargetZoomTypeR` | tail2 | **READBACK_VERIFIED** (state); visual `ACCEPTED_UNPROVEN` | rc + `ai_sub_mode` + visual | `-1/0 → sub 0`, `1 → 1`, `2 → 2`, `3 → 3`, `4/5/6/99 → 4` (Human Normal/FullBody/HalfBody/CloseUp/CustomAutoZoom). **Full-body vs close-up frames were visually identical** in 2 samples at 640×480; digital zoom readback stayed 1.0. |
-| `aiSetTargetViewTypeR` | tail2 | **ACCEPTED_UNPROVEN / no observed effect** | rc + `ai_sub_mode` + zoom | all 12 documented values (`Ignored=-2 … Trace=9`) returned rc=0 and left `ai_sub_mode=0` and zoom 1.0 unchanged |
+| `aiSetTargetZoomTypeR` | tail2 | **READBACK_VERIFIED** (state); visual `ACCEPTED_UNPROVEN` (bbox scale/cx/cy not measured) | rc + `ai_sub_mode` + visual | `-1/0 → sub 0`, `1 → 1`, `2 → 2`, `3 → 3`, `4/5/6/99 → 4` (Human Normal/FullBody/HalfBody/CloseUp/CustomAutoZoom). **Full-body vs close-up frames were visually identical** in 2 samples at 640×480; digital zoom readback stayed 1.0. |
+| `aiSetTargetViewTypeR` | tail2 | **ACCEPTED_UNPROVEN** (no effect observed under tested preconditions) | rc + `ai_sub_mode` + zoom | all 12 documented values (`Ignored=-2 … Trace=9`) returned rc=0 and left `ai_sub_mode=0` and zoom 1.0 unchanged. Insufficient evidence for a hard `no-op` claim: the expected-effect predicate (frame-bound bbox scale/cx/cy under Track) was not fully instrumented. |
 | framing/value getters | — | **NO_PUBLIC_PATH** | static | no `aiGetTargetZoomTypeR` / `aiGetTargetViewTypeR` in the public headers; only `ai_sub_mode` state |
-| `aiSetSelectedTargetR` | tail2 | **VERIFIED** (M1B) | rc + physical + visual | box/center/largest; identity is device-decided; silent no-op without a detectable face |
+| `aiSetSelectedTargetR` | tail2 | **VERIFIED** (M1B) | rc + physical + visual | box/center/largest; identity is device-decided; a human box with no detectable face/head produced no actuation (completed, zero gimbal delta over 3 samples) |
 | `DevTargetZoomType` / `DevTargetViewType` / `DevCustomizedZoomType` | data | `READBACK_VERIFIED` via sub_mode (zoom only) | — | enum bodies in `docs/Tail2_SDK_CENSUS.md` |
 
 ### A4. Zoom family
@@ -119,11 +119,33 @@ original snapshot was re-read after the sweep and matched.
 | `cameraSetZoomAbsoluteR(zoom, speed)` | meet+tail2+tailair+tiny | **VERIFIED** | rc + readback + visual | **slow asynchronous ramp**: 1.0→1.11 in ~5 s at speed 5 (~0.025/s); getter lags; do not treat the next readback as final |
 | `cameraGetZoomAbsoluteR` | meet+tailair+tiny (no tail2) | **READBACK_VERIFIED** | readback | normalized ≥1.0 |
 | `cameraGetRangeZoomAbsoluteR` | meet+tailair+tiny | **READBACK_VERIFIED** | readback | `{min 0, max 100, step 1, default 0, valid true}` — unit space does **not** match the normalized zoom readback; unresolved |
-| `cameraSetZoomStopR` | tail air | **CONSTRAINED / no-op on Tail2** | rc + readback | rc=0; after the command the zoom kept ramping (1.10 → 1.15 → 1.23). Must not be used as a stop. |
-| `cameraSetZoomWithSpeedRelativeR(step,speed,step_mode,in)` | tailair | **CONSTRAINED / no-op on Tail2** | rc + readback | rc=0; relative-in from 1.0 left zoom at 1.0 for 7.5 s |
-| `cameraSetZoomWithSpeedAbsoluteR(ratio,speed)` | tailair+tiny | **CONSTRAINED / no-op on Tail2** | rc + readback | rc=0; ratio=150 from 1.0 left zoom at 1.0 for 6 s |
+| `cameraSetZoomStopR` | tail air | **UNSUPPORTED_TAIL2** (measured no effect on fw 7.2.9.41) | rc + readback | rc=0; the zoom kept ramping after the command (1.10 → 1.15 → 1.23). Documented for another product; no working condition found. Must not be used as a stop. |
+| `cameraSetZoomWithSpeedRelativeR(step,speed,step_mode,in)` | tailair | **UNSUPPORTED_TAIL2** (measured no effect on fw 7.2.9.41) | rc + readback | rc=0; relative-in from 1.0 left zoom at 1.0 for 7.5 s. No working condition found. |
+| `cameraSetZoomWithSpeedAbsoluteR(ratio,speed)` | tailair+tiny | **UNSUPPORTED_TAIL2** (measured no effect on fw 7.2.9.41) | rc + readback | rc=0; ratio=150 from 1.0 left zoom at 1.0 for 6 s. No working condition found. |
 | `aiSetAiAutoZoomR(enabled)` | tailair+tiny | **ACCEPTED_UNPROVEN** | rc | rc=0 both ways; no readback path and no isolated visual test |
 | digital zoom (`ZoomParamType{…DIGITAL_ZOOM}`) | generic | **NO_PUBLIC_PATH** | static | enum exists; no located setter |
+
+## 2.5 Evidence standard: Expected Effect Predicate
+
+Statuses in this map are assigned against a **per-capability expected effect**, not a
+generic `rc == 0 and getter unchanged => no-op` rule. A single generic rule would
+manufacture false negatives as easily as false positives.
+
+| capability | expected effect predicate |
+|---|---|
+| offset write | typed readback of the value (and, if supported, a frame-bound composition shift) |
+| zoom write | zoom time-series changes toward the target, slope non-zero |
+| zoom stop | slope converges to 0 within a bounded window |
+| gimbal move | angle / angular-velocity readback changes toward the command |
+| pan/pitch lock | pan/pitch response to a moving target is suppressed |
+| framing / view | frame-bound bbox scale / cx / cy change under Track |
+| gesture | event + state transition + physical response |
+
+If evidence is insufficient to evaluate the predicate, the row must be
+`ACCEPTED_UNPROVEN` — never a bare `no-op` claim. Wave A rows that cite
+"no effect observed" also name the preconditions that were tested. This predicate
+set is the seed of the later mid-layer **Outcome Verifier**.
+
 
 ## 3. Other families — static disposition (Waves B/C/D input)
 
@@ -144,8 +166,8 @@ original snapshot was re-read after the sweep and matched.
 | class | items | reason |
 |---|---|---|
 | `NO_PUBLIC_PATH` | candidate notification (`DevCDCNotifyTypeAiTarget`); device-side real-time tracking-box readback; framing value getters; digital-zoom enable without a located setter | enum/hint only |
-| `UNSUPPORTED_TAIL2` | offset values `OffsetX/OffsetY` (15/17); `cameraSetPanTilt*`; `cameraSetRoiTarget`; `aiSetSelectTargetR`(tiny) | measured no-op and/or documented for other products |
-| `CONSTRAINED` | `aiSetGimbalMotorAngleR` under Track (AI contends); `gim_ctrl_speed_mode` Custom=100; zoom stop / relative / with-speed | works only under stated conditions, or only partly |
+| `UNSUPPORTED_TAIL2` | `cameraSetZoomStopR`, `cameraSetZoomWithSpeedRelativeR`, `cameraSetZoomWithSpeedAbsoluteR` (measured no effect on fw 7.2.9.41); offset values `OffsetX/OffsetY` (15/17, write not stored under PRO+Track+Composition); `cameraSetPanTilt*`; `cameraSetRoiTarget`; `aiSetSelectTargetR`(tiny) | measured no effect **and** no working condition found; some also documented for other products |
+| `CONSTRAINED` | `aiSetGimbalMotorAngleR` under Track (AI contends); `gim_ctrl_speed_mode` Custom=100 | a working condition **is** known and stated; behaviour differs from the plain path |
 | `DEFERRED_UNSAFE` | `aiRstGimbalBootPosR`, `gimbalRstPosR`, `aiSetGimbalBootPosR`, format/delete/erase/upgrade/download/restore families | destructive or persistent writes |
 | `NOT_PRODUCT_RELEVANT` | TWS/earbuds, HDMI/SDI output, network config, remote-custom keys, zone presets | not part of the Agent Camera MVP |
 

@@ -9,7 +9,7 @@
 ## 0. 一句话结论
 
 **Tail2 存在可靠的绝对角度 Look**，而且原生 Gimbal 家族的文档适用性（只写 tailair+tiny）是错的；
-但 `aiSetTargetViewTypeR` 与 zoom 家族的三个写接口是**静默 no-op**，offset 数值在 Tail2 上存不下去。
+但 `aiSetTargetViewTypeR` 与 zoom 家族的三个写接口属于**静默失败（rc=0 且本轮测试前置下无效果）**，offset 数值在 Tail2 上存不下去。
 → 中间层设计不能再依赖「文档适用性」，也不能把 `rc=0` 当成功。
 
 ## 1. 交付物
@@ -50,22 +50,23 @@
 ## 4. A3 Target View / Zoom
 
 - `aiSetTargetZoomTypeR`：**状态可回读** —— `ai_sub_mode` 映射 `−1/0→0`、`1→1`、`2→2`、`3→3`、`4/5/6/99→4`（Human Normal/FullBody/HalfBody/CloseUp/CustomAutoZoom）。
-  但 **full-body 与 close-up 的画面几乎完全一致**（640×480，2 次）⇒ 视觉效果 `ACCEPTED_UNPROVEN`。
-- `aiSetTargetViewTypeR`：12 个文档值全部 `rc=0`，`ai_sub_mode` 与 zoom **毫无变化** ⇒ 静默 no-op。
+  但 **full-body 与 close-up 的画面几乎完全一致**（640×480，2 次）⇒ 视觉效果 `ACCEPTED_UNPROVEN`（bbox scale/cx/cy 未插桩）。
+- `aiSetTargetViewTypeR`：12 个文档值全部 `rc=0`，`ai_sub_mode` 与 zoom **毫无变化** ⇒ 无效果（`ACCEPTED_UNPROVEN`）。
 - 无 `aiGetTargetZoomTypeR` / `aiGetTargetViewTypeR` ⇒ framing 数值回读 `NO_PUBLIC_PATH`，只能读 `ai_sub_mode`。
 
 ## 5. A4 Zoom family
 
 - `cameraSetZoomAbsoluteR`：`VERIFIED`，但**是慢速异步斜坡**（speed=5 时 1.0→1.11 用 ~5s，约 0.025/s），getter 滞后。
 - `cameraGetZoomAbsoluteR` 归一化 ≥1.0；`cameraGetRangeZoomAbsoluteR` 返回 `{0,100,1,0,valid}` —— **单位空间与归一化回读不一致**（未解）。
-- **`cameraSetZoomStopR`、`cameraSetZoomWithSpeedRelativeR`、`cameraSetZoomWithSpeedAbsoluteR` 在 Tail2 上都是 no-op**：rc=0，但 zoom 不动/停不住（stop 后仍 1.10→1.15→1.23）。
+- **`cameraSetZoomStopR`、`cameraSetZoomWithSpeedRelativeR`、`cameraSetZoomWithSpeedAbsoluteR` 在 Tail2 上均为 `UNSUPPORTED_TAIL2`（fw 7.2.9.41 实测无效果，且未找到任何可用条件）**：rc=0，但 zoom 不动/停不住（stop 后仍 1.10→1.15→1.23）。
 - `aiSetAiAutoZoomR`：rc=0，无回读、无隔离视觉 ⇒ `ACCEPTED_UNPROVEN`。
 - 数字变焦：只有枚举，无 setter ⇒ `NO_PUBLIC_PATH`。
 
 ## 6. 对中间层的影响（本轮最重要的产出）
 
 1. `Look` 不必再建立在 ±10 dps 限速 hack 上；可以做**绝对角度 + 原生停止**，但必须**显式管理 AI 所有权**（Track 中绝对控制会被争用）。
-2. **静默 no-op 检测器是必需品**：`view.set` / zoom stop / zoom relative / zoom with-speed 都 rc=0 且什么都不做；若运行时按 rc 判定，Agent 会建立错误世界模型。
+2. **rc=0 无效果这一类静默失败必须用「期望效果判据（Expected Effect Predicate）」兜住**：`view.set` / zoom stop / zoom relative / zoom with-speed 在本轮测试前置下都 rc=0 且无效果。
+   **不做通用 no-op 检测器**（`rc==0 && getter 未变 => no-op` 会制造新的假判定）；每类能力用各自的判据（offset→typed readback、zoom→时间序列、zoom stop→斜率收敛、gimbal→角度/角速度、lock→响应被抑制、framing→frame-bound bbox、gesture→事件+状态+物理响应），证据不足只能记 `ACCEPTED_UNPROVEN`。
 3. **文档适用性不可信**（两向都已被证伪）；`docs/Tail2_SDK_CENSUS.md` 的 applicability 只能当线索。
 4. framing 的**唯一回读通道是 `ai_sub_mode`**；构图数值域在 Tail2 上不可读，构图原语只能表达「状态」，不能表达「精确值」。
 
