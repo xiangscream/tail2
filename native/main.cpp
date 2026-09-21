@@ -166,6 +166,33 @@ public:
             j::array slots; for (int v:ids.data_int32) slots.emplace_back(v);
             return {{"len_raw",ids.len},{"int32_slots_raw",slots},{"count_interpretation","UNVERIFIED"},{"scope","gimbal_only"}};
         }
+        if (op=="gimbal.state.get") {
+            compatibility(); Device::AiGimbalStateInfo info{};
+            checked_rc(call("aiGetGimbalStateR",[&]{return dev_->aiGetGimbalStateR(&info);}));
+            return {{"roll_euler",info.roll_euler},{"pitch_euler",info.pitch_euler},{"yaw_euler",info.yaw_euler},
+                    {"roll_motor",info.roll_motor},{"pitch_motor",info.pitch_motor},{"yaw_motor",info.yaw_motor},
+                    {"roll_v",info.roll_v},{"pitch_v",info.pitch_v},{"yaw_v",info.yaw_v}};
+        }
+        if (op=="gimbal.para.get") {
+            compatibility();
+            const int t=static_cast<int>(num(a,"type",0,100));
+            const auto para=static_cast<Device::DevGimbalParaType>(t);
+            bool b=false; const int rcb=call("aiGetGimbalParaR(bool)",[&]{return dev_->aiGetGimbalParaR(para,b);});
+            float f=-12345.f; const int rcf=call("aiGetGimbalParaR(float)",[&]{return dev_->aiGetGimbalParaR(para,f);});
+            j::object out{{"type",t},{"bool_rc",rcb},{"float_rc",rcf},
+                          {"note","the bool overload accepts every type; read both"}};
+            if(rcb==0) out["bool_value"]=b;
+            if(rcf==0) out["float_value"]=f;
+            return out;
+        }
+        if (op=="gimbal.bootpos.get") {
+            compatibility(); Device::PresetPosInfo info{};
+            const int rc=call("aiGetGimbalBootPosR",[&]{return dev_->aiGetGimbalBootPosR(&info);});
+            j::object out{{"rc",rc},{"completion","unverified"}};
+            if(rc==0){ out["id"]=info.id; out["roll"]=info.roll; out["pitch"]=info.pitch;
+                       out["yaw"]=info.yaw; out["zoom"]=info.zoom; }
+            return out;
+        }
         writable();
         if (op=="target.select") {
             Device::DevTargetSelection s{};
@@ -211,13 +238,27 @@ public:
             s.zoom_type=Device::DevTargetZoomTypeIgnored; s.view_type=Device::DevTargetViewTypeIgnored;
             checked_rc(call("aiSetSelectedTargetR(delete)",[&]{return dev_->aiSetSelectedTargetR(s);}));
         } else if (op=="framing.set") {
-            const auto mode=str(a,"mode"); Device::DevTargetZoomType z;
-            if(mode=="full_body") z=Device::DevTargetZoomTypeFullBody;
-            else if(mode=="half_body") z=Device::DevTargetZoomTypeHalfBody;
-            else if(mode=="close_up") z=Device::DevTargetZoomTypeCloseUp;
-            else if(mode=="normal") z=Device::DevTargetZoomTypeNormal;
-            else throw std::runtime_error("unsupported framing");
+            Device::DevTargetZoomType z;
+            if (a.if_contains("value")) {
+                const int v=static_cast<int>(num(a,"value",-1,99));
+                z=static_cast<Device::DevTargetZoomType>(v);
+            } else {
+                const auto mode=str(a,"mode");
+                if(mode=="ignored") z=Device::DevTargetZoomTypeIgnored;
+                else if(mode=="full_body") z=Device::DevTargetZoomTypeFullBody;
+                else if(mode=="half_body") z=Device::DevTargetZoomTypeHalfBody;
+                else if(mode=="close_up") z=Device::DevTargetZoomTypeCloseUp;
+                else if(mode=="normal") z=Device::DevTargetZoomTypeNormal;
+                else if(mode=="customized") z=Device::DevTargetZoomTypeCustomized;
+                else if(mode=="grop_headless") z=Device::DevTargetZoomTypeGropHeadless;
+                else if(mode=="grop_lower_body") z=Device::DevTargetZoomTypeGropLowerBody;
+                else if(mode=="adaptive") z=Device::DevTargetZoomTypeAdaptive;
+                else throw std::runtime_error("unsupported framing");
+            }
             checked_rc(call("aiSetTargetZoomTypeR",[&]{return dev_->aiSetTargetZoomTypeR(z);}));
+        } else if (op=="framing.get") {
+            return {{"zoom_type",nullptr},{"status","NO_PUBLIC_PATH"},
+                    {"reason","no aiGetTargetZoomTypeR / aiGetTargetViewTypeR in public headers; read ai_sub_mode instead"}};
         } else if (op=="track.set") {
             compatibility(); bool on=boolean(a,"enabled");
             checked_rc(call("aiSetEnabledR",[&]{return dev_->aiSetEnabledR(on);}));
@@ -309,6 +350,63 @@ public:
             checked_rc(call("aiTrgGimbalPresetR",[&]{return dev_->aiTrgGimbalPresetR(static_cast<int>(n));}));
         } else if(op=="position.save") {
             throw std::runtime_error("deferred: preset ID ownership/len semantics require local verification before any persistent write");
+        } else if(op=="gimbal.angle") {
+            compatibility();
+            const double pitch=num(a,"pitch",-90,90), yaw=num(a,"yaw",-180,180);
+            const double roll=a.if_contains("roll")?num(a,"roll",-180,180):-1000.0;
+            checked_rc(call("aiSetGimbalMotorAngleR",[&]{return dev_->aiSetGimbalMotorAngleR(
+                static_cast<float>(pitch),static_cast<float>(yaw),static_cast<float>(roll));}));
+        } else if(op=="gimbal.speed") {
+            compatibility();
+            const double pitch=num(a,"pitch",-180,180), pan=num(a,"pan",-180,180);
+            const double roll=a.if_contains("roll")?num(a,"roll",-180,180):0.0;
+            checked_rc(call("aiSetGimbalSpeedCtrlR",[&]{return dev_->aiSetGimbalSpeedCtrlR(pitch,pan,roll);}));
+        } else if(op=="gimbal.native_stop") {
+            compatibility();
+            checked_rc(call("aiSetGimbalStop",[&]{return dev_->aiSetGimbalStop();}));
+        } else if(op=="gimbal.bootpos.trg") {
+            compatibility(); const bool reset_mode=a.if_contains("reset_mode")?boolean(a,"reset_mode"):false;
+            checked_rc(call("aiTrgGimbalBootPosR",[&]{return dev_->aiTrgGimbalBootPosR(reset_mode);}));
+        } else if(op=="gimbal.para.set") {
+            compatibility();
+            const int t=static_cast<int>(num(a,"type",0,100));
+            const auto para=static_cast<Device::DevGimbalParaType>(t);
+            const std::string k=str(a,"kind"); const char kind=k.empty()?'f':k[0];
+            if(kind=='b'){ const bool v=boolean(a,"value");
+                checked_rc(call("aiSetGimbalParaR(bool)",[&]{return dev_->aiSetGimbalParaR(para,v);})); }
+            else { const double v=num(a,"value",-100000,100000);
+                checked_rc(call("aiSetGimbalParaR(float)",[&]{return dev_->aiSetGimbalParaR(para,static_cast<float>(v));})); }
+        } else if(op=="gimbal.yawreverse.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetGimbalYawDirReverseR",[&]{return dev_->aiSetGimbalYawDirReverseR(on);}));
+        } else if(op=="gimbal.pos.speed") {
+            compatibility();
+            const double roll=num(a,"roll",-90,90), pitch=num(a,"pitch",-90,90), yaw=num(a,"yaw",-90,90);
+            const double sroll=a.if_contains("s_roll")?num(a,"s_roll",-90,90):0.0;
+            const double spitch=a.if_contains("s_pitch")?num(a,"s_pitch",-90,90):0.0;
+            const double syaw=a.if_contains("s_yaw")?num(a,"s_yaw",-90,90):0.0;
+            checked_rc(call("gimbalSetSpeedPositionR",[&]{return dev_->gimbalSetSpeedPositionR(
+                static_cast<float>(roll),static_cast<float>(pitch),static_cast<float>(yaw),
+                static_cast<float>(sroll),static_cast<float>(spitch),static_cast<float>(syaw));}));
+        } else if(op=="view.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"view_type",-2,99));
+            checked_rc(call("aiSetTargetViewTypeR",[&]{return dev_->aiSetTargetViewTypeR(
+                static_cast<Device::DevTargetViewType>(v));}));
+        } else if(op=="zoom.relative") {
+            compatibility();
+            const int step=static_cast<int>(num(a,"step",1,100)), speed=static_cast<int>(num(a,"speed",1,255));
+            const bool step_mode=a.if_contains("step_mode")?boolean(a,"step_mode"):false;
+            const bool in_out=boolean(a,"in");
+            checked_rc(call("cameraSetZoomWithSpeedRelativeR",[&]{return dev_->cameraSetZoomWithSpeedRelativeR(
+                static_cast<uint32_t>(step),static_cast<uint32_t>(speed),step_mode,in_out);}));
+        } else if(op=="zoom.withspeed") {
+            compatibility();
+            const int ratio=static_cast<int>(num(a,"ratio",0,1000)), speed=static_cast<int>(num(a,"speed",1,255));
+            checked_rc(call("cameraSetZoomWithSpeedAbsoluteR",[&]{return dev_->cameraSetZoomWithSpeedAbsoluteR(
+                static_cast<uint32_t>(ratio),static_cast<uint32_t>(speed));}));
+        } else if(op=="zoom.stop") {
+            compatibility();
+            checked_rc(call("cameraSetZoomStopR",[&]{return dev_->cameraSetZoomStopR();}));
         } else throw std::runtime_error("unsupported operation");
         return {{"dispatch","accepted"},{"completion","unverified"},{"artifact",nullptr}};
     }
