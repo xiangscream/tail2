@@ -83,6 +83,8 @@ class Observer:
         self.framing = {"requested": None, "sdk_reported": None, "visual_check": None}
         self.ai_status: dict = {}
         self._last_epoch = service.camera_epoch
+        self._call_timeout: float | None = None
+        self._handle_lock = threading.Lock()
         self._lock = threading.Lock()
 
     def _require_control(self) -> None:
@@ -93,8 +95,12 @@ class Observer:
         if not self.legacy:
             raise RuntimeError("legacy probe disabled: restart with --allow-legacy-probes")
 
-    def _call(self, op: str, args: dict | None = None, timeout: float = 20) -> dict:
-        return self.bridge.request(op, args or {}, timeout=timeout)
+    def _call(self, op: str, args: dict | None = None, timeout: float | None = None) -> dict:
+        resolved = timeout if timeout is not None else self._call_timeout
+        if resolved is None:
+            resolved = 20.0
+        resolved = max(0.05, min(60.0, resolved))
+        return self.bridge.request(op, args or {}, timeout=resolved)
 
     def _record_ai(self, result: dict) -> None:
         with self._lock:
@@ -110,6 +116,17 @@ class Observer:
                 self.requested_roi = None
                 self.requested_roi_sdk = None
                 self.selected = None
+
+    def invalidate(self, reason: str = "session rebuild") -> None:
+        self.observations.clear()
+        self.calibration.invalidate(reason)
+        with self._lock:
+            self.requested_roi = None
+            self.requested_roi_sdk = None
+            self.selected = None
+            self.track = {"requested": None, "sdk_reported": {"invalidated": reason}}
+            self.framing = {"requested": None, "sdk_reported": {"invalidated": reason},
+                            "visual_check": None}
 
     def snapshot(self, args: dict | None = None) -> dict:
         self._sync_epoch()
@@ -365,7 +382,15 @@ class Observer:
                     "conflicts": self.conflicts,
                     "notes": ["requested_roi is not a native device tracking box"]}
 
-    def handle(self, request: dict) -> dict:
+    def handle(self, request: dict, *, timeout: float | None = None) -> dict:
+        with self._handle_lock:
+            self._call_timeout = timeout
+            try:
+                return self._dispatch(request)
+            finally:
+                self._call_timeout = None
+
+    def _dispatch(self, request: dict) -> dict:
         op = request.get("op")
         args = request.get("args") or {}
         if op == "snapshot":

@@ -266,6 +266,35 @@ class ObserverTests(unittest.TestCase):
             observer.handle({"op": "target.select", "args": {
                 "observation_id": snap["observation_id"], "x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}})
 
+    def test_session_rebuild_invalidates_observer_state(self):
+        from tail2_mvp.observations import ReobserveRequired
+        from tail2_mvp.session import RuntimeSession
+
+        observer, _ = self.make()
+        snap = observer.handle({"op": "snapshot"})
+        observer.handle({"op": "target.select", "args": {
+            "observation_id": snap["observation_id"], "candidate_id": "p1"}})
+        self.assertIsNotNone(observer.requested_roi)
+        self.assertTrue(observer.calibration.profile().verified)
+
+        class ClosableBridge:
+            def request(self, op, args=None, timeout=20):
+                return {"ok": True, "result": {}}
+
+            def close(self):
+                pass
+
+        session = RuntimeSession(lambda: ClosableBridge(),
+                                 on_rebuild=lambda epoch: observer.invalidate(f"session rebuild epoch={epoch}"))
+        session.rebuild()
+        self.assertEqual(session.camera_epoch, 1)
+        self.assertIsNone(observer.requested_roi)
+        self.assertFalse(observer.calibration.profile().verified)
+        self.assertEqual(observer.track["sdk_reported"], {"invalidated": "session rebuild epoch=1"})
+        with self.assertRaises(ReobserveRequired):
+            observer.handle({"op": "target.select", "args": {
+                "observation_id": snap["observation_id"], "candidate_id": "p1"}})
+
     def test_target_select_requires_control(self):
         observer, _ = self.make(control=False)
         snap = observer.handle({"op": "snapshot"})

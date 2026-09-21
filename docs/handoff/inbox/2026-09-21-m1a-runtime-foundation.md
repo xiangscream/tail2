@@ -36,3 +36,12 @@
 - `payload` 承载 capability 专属数据（观察、候选、target），与 `sdk_reported` 分开。
 - M1A 不含 Target/Track 金链、Framing Solver、Look/Media ownership 真机策略（分别 M1B/M1C/M1D）。
 - 真机回归留待 M1B（由网页端给 exact-head 实验矩阵）。
+
+## PR #10 review 修复（4 个 contract blocker）
+
+1. **task cancel 变为真实取消**：`CapabilityRuntime` 改为 `task_id -> list[token]`（request_id 仍单独索引）；`cancel(task_id)` 取消该 task 全部 active/queued request；`task.cancel` capability 由 Runtime 原生处理，返回 `cancelled_count` 与 `target_task_id`。测试覆盖同一 task 多 token。
+2. **observation_id 接进正式契约**：Adapter 以 `request.observation_id` 为准并注入设备调用；若 `args.observation_id` 与之不一致 → 拒绝（`CapabilityRejected`→failed）。上层只用 formal field。
+3. **deadline 改为 cooperative 并接通底层**：Adapter 每个调用前检查 token/deadline，并把 `deadline.remaining()`（clamp 0.05–60s）经 `Observer.handle(timeout=...)` 传到底层 bridge；bridge 超时 → `BridgeError` → 隔离并**重建 session**；Runtime 在 handler 返回后若 deadline 已过且为副作用类 → `indeterminate`。**明确不是硬中断保证**（同步 SDK call 无法强杀）。
+4. **rebuild 真正失效 Observer 权威状态**：`RuntimeSession.on_rebuild(epoch)` 接到 `Observer.invalidate(reason)`，清 `ObservationStore`、失效 calibration、清 selected/requested ROI/track/framing；旧 observation 一律 `REOBSERVE_REQUIRED`。补**集成测试**（真实 ObservationStore + CalibrationStore + Observer，非 fake StateRegistry）。
+
+测试：**109/109 通过**（Windows x64 + Linux，含 6 native）。

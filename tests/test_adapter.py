@@ -1,7 +1,7 @@
 import unittest
 
 from tail2_mvp.adapter import Tail2Adapter
-from tail2_mvp.runtime import CapabilityRequest, CapabilityRuntime, Execution
+from tail2_mvp.runtime import CancelToken, CapabilityRequest, CapabilityRuntime, Execution
 
 
 class FakeObserver:
@@ -9,8 +9,8 @@ class FakeObserver:
         self.responses = responses
         self.calls = []
 
-    def handle(self, request):
-        self.calls.append(request)
+    def handle(self, request, *, timeout=None):
+        self.calls.append({"request": request, "timeout": timeout})
         op = request.get("op")
         if op not in self.responses:
             return {"op": op, "ok": False, "error": f"no fake for {op}"}
@@ -44,13 +44,51 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result.continuation_id, "t1")
 
     def test_target_select_in_track_reports_side_effects(self):
-        runtime, _ = build({"target.select": {"ok": True, "result": {
+        runtime, observer = build({"target.select": {"ok": True, "result": {
             "dispatch": "accepted", "side_effects": "UNVERIFIED", "calibration": {"verified": True},
             "requested_roi_sdk": [0.1, 0.2, 0.3, 0.4]}}})
-        result = runtime.execute(CapabilityRequest("target.select", args={"candidate_id": "c1"}))
+        result = runtime.execute(CapabilityRequest("target.select", observation_id="o1",
+                                                   args={"candidate_id": "c1"}))
         self.assertEqual(result.execution, Execution.COMPLETED)
         self.assertIn("side_effects", result.sdk_reported)
         self.assertEqual(result.payload["target"]["requested_roi_sdk"], [0.1, 0.2, 0.3, 0.4])
+        sent = observer.calls[-1]["request"]["args"]
+        self.assertEqual(sent["observation_id"], "o1")
+
+    def test_target_select_requires_first_class_observation(self):
+        runtime, _ = build({})
+        result = runtime.execute(CapabilityRequest("target.select", args={"candidate_id": "c1"}))
+        self.assertEqual(result.execution, Execution.FAILED)
+        self.assertEqual(result.errors[0].code, "rejected")
+
+    def test_target_select_conflicting_observation_rejected(self):
+        runtime, observer = build({"target.select": {"ok": True, "result": {}}})
+        result = runtime.execute(CapabilityRequest(
+            "target.select", observation_id="o1",
+            args={"observation_id": "o2", "candidate_id": "c1"}))
+        self.assertEqual(result.execution, Execution.FAILED)
+        self.assertEqual(result.errors[0].code, "rejected")
+        self.assertEqual(observer.calls, [])
+
+    def test_deadline_remaining_passed_to_observer(self):
+        runtime, observer = build({"status": {"ok": True, "result": {}}})
+        result = runtime.execute(CapabilityRequest("status.get", deadline_s=5))
+        self.assertEqual(result.execution, Execution.COMPLETED)
+        self.assertIsNotNone(observer.calls[-1]["timeout"])
+        self.assertLessEqual(observer.calls[-1]["timeout"], 5.0)
+
+    def test_task_cancel_cancels_all_requests_in_task(self):
+        runtime, _ = build({})
+        tokens = []
+        with runtime._lock:
+            for _ in range(3):
+                token = CancelToken()
+                tokens.append(token)
+                runtime._by_task.setdefault("taskX", []).append(token)
+        result = runtime.execute(CapabilityRequest("task.cancel", args={"task_id": "taskX"}))
+        self.assertEqual(result.execution, Execution.COMPLETED)
+        self.assertEqual(result.payload["cancelled_count"], 3)
+        self.assertTrue(all(t.cancelled for t in tokens))
 
     def test_track_start_requires_reobserve(self):
         runtime, _ = build({"track.enter": {"ok": True, "result": {

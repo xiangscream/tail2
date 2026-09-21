@@ -264,7 +264,8 @@ class CapabilityRuntime:
         self._resources: dict[str, tuple[str, ...]] = {}
         self._writer = SingleWriter()
         self._lock = threading.Lock()
-        self._tokens: dict[str, CancelToken] = {}
+        self._by_task: dict[str, list[CancelToken]] = {}
+        self._by_request: dict[str, CancelToken] = {}
 
     def register(self, capability: str, handler, *, resources: tuple[str, ...] = ()) -> None:
         if not capability:
@@ -279,24 +280,43 @@ class CapabilityRuntime:
 
     def active_requests(self) -> list[str]:
         with self._lock:
-            return sorted(self._tokens)
+            return sorted(self._by_request)
+
+    def tokens_for_task(self, task_id: str) -> list[CancelToken]:
+        with self._lock:
+            return list(self._by_task.get(task_id, ()))
 
     def cancel(self, identifier: str) -> bool:
         with self._lock:
-            token = self._tokens.get(identifier)
-        if token is None:
-            return False
-        token.cancel()
-        return True
+            token = self._by_request.get(identifier)
+            if token is not None:
+                token.cancel()
+                return True
+            tokens = list(self._by_task.get(identifier, ()))
+        for token in tokens:
+            token.cancel()
+        return bool(tokens)
+
+    def cancel_task(self, task_id: str) -> int:
+        with self._lock:
+            tokens = list(self._by_task.get(task_id, ()))
+        for token in tokens:
+            token.cancel()
+        return len(tokens)
 
     def cancel_all(self) -> int:
         with self._lock:
-            tokens = list(self._tokens.values())
+            tokens = list(self._by_request.values())
         for token in tokens:
             token.cancel()
         return len(tokens)
 
     def execute(self, request: CapabilityRequest) -> CapabilityResult:
+        if request.capability == "task.cancel":
+            target = request.args.get("task_id") or request.task_id
+            count = self.cancel_task(target)
+            return self._result(request, Execution.COMPLETED, requested={"task_id": target},
+                                payload={"cancelled_count": count, "target_task_id": target})
         with self._lock:
             handler = self._handlers.get(request.capability)
             resources = self._resources.get(request.capability, ())
@@ -306,8 +326,8 @@ class CapabilityRuntime:
         token = CancelToken()
         owner = request.task_id
         with self._lock:
-            self._tokens[owner] = token
-            self._tokens[request.request_id] = token
+            self._by_request[request.request_id] = token
+            self._by_task.setdefault(owner, []).append(token)
         deadline = Deadline(request.deadline_s, self._clock) if request.deadline_s else None
         acquired: list[str] = []
         side_effecting = request.capability in SIDE_EFFECTING
@@ -322,6 +342,9 @@ class CapabilityRuntime:
                 return handler(request, token, deadline)
 
             output = self._writer.run(run, token)
+            if deadline and deadline.expired() and side_effecting:
+                return self._result(request, Execution.INDETERMINATE,
+                                    errors=[CapabilityError("deadline", "deadline exceeded during execution")])
             return self._from_output(request, output)
         except ReobserveRequired as exc:
             return self._result(request, Execution.REOBSERVE_REQUIRED, requested=exc.requested,
@@ -347,9 +370,12 @@ class CapabilityRuntime:
             for resource in acquired:
                 self.ownership.release(resource, owner)
             with self._lock:
-                self._tokens.pop(request.request_id, None)
-                if self._tokens.get(owner) is token:
-                    self._tokens.pop(owner, None)
+                self._by_request.pop(request.request_id, None)
+                tokens = self._by_task.get(owner)
+                if tokens is not None:
+                    self._by_task[owner] = [t for t in tokens if t is not token]
+                    if not self._by_task[owner]:
+                        self._by_task.pop(owner, None)
 
     def _from_output(self, request: CapabilityRequest, output: Any) -> CapabilityResult:
         if isinstance(output, CapabilityResult):

@@ -66,3 +66,6 @@ class RuntimeSession:
                 self._bridge.close()
             except Exception:
                 pass
+
+    def set_rebuild_hook(self, callback: Callable[[int], None]) -> None:
+        self._on_rebuild = callback
