@@ -2,11 +2,11 @@
 
 2026-09-21 · Tail2 Embodied Agent MVP
 
-当前阶段：**M1 Capability Runtime / M1B Target + Track（真机 B0→B6 完成）**
+当前阶段：**M1 Capability Runtime / M1B Target + Track 已结项，准备 M1C**
 
-开发分支：`m1/capability-runtime`
+集成基线：`main`（后续功能分支一律从 main 开，PR 直接回 main）
 主任务：Issue #8
-M1B 子任务：Issue #11
+M1B 子任务：Issue #11（结项）
 M0/M0.5 结项基线：`704b7fc2054e85d850ec2969964a17abc307cad3`
 
 ## 已完成：M1A Runtime Foundation
@@ -80,3 +80,25 @@ M1A 报告：
 
 Issue #11：
 <https://github.com/xiangscream/tail2/issues/11>
+
+
+## M1B 结项裁决
+
+M1B PASS，不再追加双人身份稳定性专项作为本阶段 blocker。
+
+冻结语义：
+
+- `target.select completed` = Runtime/Adapter/设备选择请求链完成；**不等于身份已被设备可靠锁定**。
+- `ai_main_mode==2` = Track runtime；**不等于 healthy following**。
+- gimbal yaw 变化只能作为 `motion_evidence`，不是 visual identity proof。
+- `follow_health` 在没有 frame-bound visual verifier 时保持 `unknown`。
+- human Box 的“框内无可检测头/脸时静默 no-op”和多人身份歧义作为设备/Perception 限制，进入后续 Target verification / M2，不阻塞 M1B。
+- requested ROI 永远是选择帧坐标，不是实时 tracking box。
+
+## Git 工作流
+
+从本轮起恢复普通主干工作流：
+
+`main → feature branch → PR → CI/review → main`
+
+不再把 `kickoff/*`、`m1/*` 当长期集成主线。阶段分支/本地 Agent 分支只承担短期开发与证据回读，合格后直接进入 main。长期事实以 main 的代码、正式 docs 和 Issue 为准。
