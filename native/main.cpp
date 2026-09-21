@@ -274,6 +274,12 @@ public:
             else if(spec->kind=='i'){ checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<int>(raw));})); }
             else { checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<float>(raw));})); }
             return {{"para",pt},{"name",std::string(spec->name)},{"kind",std::string(1,spec->kind)},{"value",raw}};
+        } else if(op=="ai.offset") {
+            compatibility();
+            if (a.if_contains("auto")) { bool en=boolean(a,"auto"); checked_rc(call("aiSetAutoOffset",[&]{return dev_->aiSetAutoOffset(en);})); return {{"auto",en}}; }
+            if (a.if_contains("x")) { float v=static_cast<float>(num(a,"x",-1,1)); checked_rc(call("aiSetHorizontalOffset",[&]{return dev_->aiSetHorizontalOffset(v);})); return {{"x",v}}; }
+            if (a.if_contains("y")) { float v=static_cast<float>(num(a,"y",-1,1)); checked_rc(call("aiSetVerticalOffset",[&]{return dev_->aiSetVerticalOffset(v);})); return {{"y",v}}; }
+            throw std::runtime_error("provide auto/x/y");
         } else if(op=="camera.face_ae") {
             compatibility(); const bool on=boolean(a,"enabled");
             checked_rc(call("cameraSetFaceAER",[&]{return dev_->cameraSetFaceAER(on?1:0);}));

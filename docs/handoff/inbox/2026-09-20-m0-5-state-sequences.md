@@ -130,3 +130,21 @@ Observation A
 - 结论：M1 的 `look` 原语在手动动作结束后**必须显式恢复 Track/AI**（`track.start` / `aiSetEnabledR(true)`）；`ai_main_mode=2` 单独不代表正在跟随。
 
 这也解释了本轮之前反复出现的“卡死/不跟随”。
+
+## 8. identity 四点验证通过 + 构图偏移尝试
+
+**identity 严格验证通过**（你保持不动、本地 Agent 实时控制）：`nudge 定位 → aiSetEnabledR(true) → Center → Box`，四点均观察到设备把目标**居中**：
+
+| 点 | 放置 | Box 后 | 结果 |
+|---|---|---|---|
+| left | (0.240,0.464) | cx 0.345→0.462 | ✅ |
+| right | (0.749,0.457) | cx 0.603→0.500 | ✅ |
+| top | (0.494,0.235) | cy 0.261→0.304 | ✅ |
+| bottom | (0.484,0.766) | cy 0.558→0.330 | ✅ |
+
+`calibration.verify` → `verified=true, mirror_x=false, rotation_deg=0`（4 outcomes）。**identity 由 4 个 SDK 选中结果验证，不再是候选。**
+
+**构图偏移（跟踪时目标不居中）尝试**：
+- `aiSetControlParaR(OffsetX/OffsetY, Composition)`：改值对目标 cx/cy **无可见影响**。
+- tail air `aiSetHorizontalOffset` / `aiSetVerticalOffset`（新增探针 `ai.offset`）：同样**无可见偏移**。
+- 结论：Tail2 上**构图偏移在已试文档化 SDK 接口中不可得**；可能仅官方 App 内部路径，或需 M1 Framing 专项。→ 列为 M1 待解决。
