@@ -2,11 +2,12 @@
 
 2026-09-21 · Tail2 Embodied Agent MVP
 
-当前阶段：**M1 Capability Runtime / M1B Target + Track 已结项，准备 M1C**
+当前阶段：**Tail2 SDK Truth Sweep（原语层冻结前的完整能力摸底）**
 
 集成基线：`main`（后续功能分支一律从 main 开，PR 直接回 main）
 主任务：Issue #8
 M1B 子任务：Issue #11（结项）
+当前计划：`../SDK_TRUTH_SWEEP_PLAN.md`
 M0/M0.5 结项基线：`704b7fc2054e85d850ec2969964a17abc307cad3`
 
 ## 已完成：M1A Runtime Foundation
@@ -102,3 +103,25 @@ M1B PASS，不再追加双人身份稳定性专项作为本阶段 blocker。
 `main → feature branch → PR → CI/review → main`
 
 不再把 `kickoff/*`、`m1/*` 当长期集成主线。阶段分支/本地 Agent 分支只承担短期开发与证据回读，合格后直接进入 main。长期事实以 main 的代码、正式 docs 和 Issue 为准。
+
+
+## 当前开发方向：SDK Truth Sweep
+
+M1B 之后暂停继续扩 M1C/M1D 原语实现。先把授权的 Tail2 SDK 资源整体摸清，再做 Pro 级 Primitive Layer Architecture Freeze。
+
+目标不是“每个 SDK 函数都包成能力”，而是让所有 Tail2-relevant 能力都有明确真值：VERIFIED / READBACK_VERIFIED / ACCEPTED_UNPROVEN / CONSTRAINED / UNSUPPORTED_TAIL2 / NO_PUBLIC_PATH / DEFERRED_UNSAFE / NOT_PRODUCT_RELEVANT。
+
+执行顺序：
+
+1. Phase 0：完整静态 SDK census，覆盖整个授权 SDK 包，而不是只看现有已知 API。
+2. Wave A：会改变原语架构的 Gimbal / AI Control / Target View+Zoom / Zoom family。
+3. Wave B：Gesture / Focus+IQ / Preset+Boot / 状态与回调。
+4. Wave C：Media / Output。
+5. Wave D：Unsupported / Deferred / No-public-path 收口。
+6. 全部完成后，再启动 Pro 级中间原语层冻结。
+
+Git 继续保持普通主干流程：
+
+`main → feature/sdk-sweep-X → PR → CI/review → main`
+
+每一 Wave 都从当时最新 main 开，不再建立长期阶段集成分支。
