@@ -14,14 +14,14 @@
 
 ## 1. 交付物
 
-- `tools/sdk_census.py` + `tests/test_sdk_census.py`（10 项，合成 header）
-- `docs/Tail2_SDK_CENSUS.md`（sanitized，480 symbols）
+- `tools/sdk_census.py` + `tests/test_sdk_census.py`（发现式 root inventory；原 10 项 + 7 项 discovery 测试）
+- `docs/Tail2_SDK_CENSUS.md`（sanitized，当前生成结果 **479 symbols**；3 public headers + 1 sample + 1 build + 29 binaries，unclassified=0）
 - `docs/Tail2_SDK_TRUTH_MAP.md`（v2，Wave A 已回填）
 - `docs/Tail2_SDK_EXPERIMENT_MATRIX.md`（Wave A 45 条 + 结果表）
 - probe 扩展（`native/main.cpp`）：`gimbal.angle / gimbal.speed / gimbal.native_stop / gimbal.state.get /
   gimbal.para.get|set / gimbal.bootpos.get|trg / gimbal.yawreverse.set / gimbal.pos.speed /
   view.set / framing.get / zoom.relative / zoom.withspeed / zoom.stop`
-- 离线测试：Windows **119 passed**（构建脚本内跑），Linux **113 passed / 6 skipped**
+- 修复前真机构建基线：Windows **119 passed**；发现式 census 修复后本地 Linux **121 passed / 6 skipped**；当前 GitHub CI 的 Windows/Ubuntu × Python 3.11/3.12 四矩阵全部通过
 
 ## 2. A1 Native Gimbal / Look —— 架构级发现
 
@@ -85,3 +85,4 @@
 3. 手势家族与 Agent 所有权的冲突（Wave B1）。
 4. 对焦 / 白平衡是否值得进入相机原语，还是留在 adapter 策略（Wave B2）。
 5. 状态回调 / 热插拔是否能把轮询换成事件（Wave B4）。
+6. Sample 引用暴露出的 46 个尚未完成 truth 定级的符号按价值分流：LimitedZoneTrack / `aiSetTrackingModeR` / `aiSetZoneTrackGimbalEnabledR` 优先进入 Wave B；FaceFocus / WDR / WhiteBalance 进入 IQ；网络 getter 等低相关项进入 Wave D/NOT_PRODUCT_RELEVANT 评估。
