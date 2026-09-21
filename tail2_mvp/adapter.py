@@ -52,7 +52,7 @@ class Tail2Adapter:
         runtime.register("target.clear", self._target_clear, resources=("device_writer",))
         runtime.register("track.start", self._track_start, resources=("device_writer",))
         runtime.register("track.status", self._track_status)
-        runtime.register("track.verify_follow", self._track_verify_follow, resources=("look",))
+        runtime.register("track.motion_evidence", self._track_motion_evidence, resources=("look",))
         runtime.register("framing.set", self._framing_set, resources=("device_writer",))
         runtime.register("look.nudge", self._look_nudge, resources=("device_writer", "look"))
         runtime.register("look.stop", self._look_stop, resources=("device_writer", "look"))
@@ -139,6 +139,10 @@ class Tail2Adapter:
                 payload={"reason": "track_runtime_entered", "target_ref": args.get("candidate_id"),
                          "previous_observation_id": observation_id, "required_next": TRACK_ENTER_CONTINUATION})
         result = self._call("target.select", args, token, deadline) or {}
+        # A new concrete target invalidates any prior follow-health evidence.
+        # Tail2 has no native tracking box / identity readback, so selection acceptance
+        # cannot by itself prove that the intended target is now being followed.
+        self.follow_health = "unknown"
         return {"execution": Execution.COMPLETED, "requested": args,
                 "sdk_reported": {"side_effects": result.get("side_effects"),
                                  "calibration": result.get("calibration")},
@@ -173,14 +177,14 @@ class Tail2Adapter:
         return {"execution": Execution.COMPLETED, "requested": {},
                 "payload": {"track": self._device_track(token, deadline)}}
 
-    def _track_verify_follow(self, request, token, deadline) -> dict:
+    def _track_motion_evidence(self, request, token, deadline) -> dict:
         state = self._device_track(token, deadline)
         if state["runtime_mode"] != "track":
-            raise CapabilityRejected("follow verification requires Track runtime")
+            raise CapabilityRejected("motion evidence requires Track runtime")
         samples = int(request.args.get("samples", 5))
         min_yaw_deg = float(request.args.get("min_yaw_deg", 0.5))
         yaws = []
-        lost = 0
+        read_errors = 0
         for _ in range(max(1, samples)):
             self._remaining(token, deadline)
             response = self._call("look.status", {}, token, deadline)
@@ -188,20 +192,25 @@ class Tail2Adapter:
             if isinstance(inner, dict) and inner.get("yaw_deg") is not None:
                 yaws.append(float(inner["yaw_deg"]))
             else:
-                lost += 1
+                read_errors += 1
             self._sleep(self._follow_poll_s)
         span = (max(yaws) - min(yaws)) if len(yaws) >= 2 else 0.0
-        if len(yaws) >= 2 and span >= min_yaw_deg and lost == 0:
-            self.follow_health = "observed_following"
-            verdict = "observed_following"
-        elif lost > len(yaws):
-            self.follow_health = "degraded"
-            verdict = "degraded"
+        if len(yaws) >= 2 and span >= min_yaw_deg:
+            verdict = "gimbal_response_observed"
+        elif len(yaws) >= 2:
+            verdict = "no_gimbal_response_observed"
         else:
-            verdict = "unknown"
+            verdict = "telemetry_insufficient"
+        evidence = {"kind": "gimbal_yaw_span", "verdict": verdict,
+                    "yaw_span_deg": span, "samples": len(yaws), "read_errors": read_errors}
+        # Gimbal motion is physical evidence, not visual identity/follow verification.
+        # Until a frame-bound visual verifier exists, follow_health must remain unknown.
+        self.follow_health = "unknown"
         return {"execution": Execution.COMPLETED, "requested": {"min_yaw_deg": min_yaw_deg},
-                "visual_check": {"verdict": verdict, "yaw_span_deg": span, "samples": len(yaws), "lost": lost},
-                "payload": {"track": self._device_track(token, deadline)}}
+                "sdk_reported": {"motion_evidence": evidence},
+                "visual_check": None,
+                "payload": {"track": self._device_track(token, deadline),
+                            "motion_evidence": evidence}}
 
     def _framing_set(self, request, token, deadline) -> dict:
         mode = request.args.get("mode")
