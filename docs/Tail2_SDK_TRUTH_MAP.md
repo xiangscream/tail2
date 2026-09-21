@@ -171,6 +171,41 @@ set is the seed of the later mid-layer **Outcome Verifier**.
 | `DEFERRED_UNSAFE` | `aiRstGimbalBootPosR`, `gimbalRstPosR`, `aiSetGimbalBootPosR`, format/delete/erase/upgrade/download/restore families | destructive or persistent writes |
 | `NOT_PRODUCT_RELEVANT` | TWS/earbuds, HDMI/SDI output, network config, remote-custom keys, zone presets | not part of the Agent Camera MVP |
 
+
+## 6. Wave B measured results (behavioral + gesture/IQ/preset/status)
+
+Statuses use the same expected-effect standard. `evidence_insufficient` rows are
+listed explicitly rather than being guessed as no-ops.
+
+| symbol / item | current_truth | evidence | notes |
+|---|---|---|---|
+| `aiSetControlParaR` PanLocked (8) | **VERIFIED** | gimbal time-series, 2 reps | yaw_span 0.00 vs baseline 21.63/19.09; pitch still moves |
+| `aiSetControlParaR` PitchLocked (11) | **VERIFIED** | gimbal time-series, 2 reps | pitch_span 0.00 vs baseline 11.24/12.39; yaw still moves |
+| `aiSetControlParaR` GimCtrlSpeedMode (5) | `evidence_insufficient` | settled position only | no settled difference; needs a transient predicate |
+| `aiSetControlParaR` TrackerType/Limits (3,19–22) | `evidence_insufficient` | settled position only | ±15 limits did not visibly clamp a one-shot reframe |
+| Motion / ForeTrack / Composition / Gains / AutoZoom* | `evidence_insufficient` | — | need a reliable motion source + frame-bound metrics |
+| box select in Normal mode | **READBACK_VERIFIED** | attitude | one-shot reframe; it does **not** enter Track (`ai_main_mode` stays 0) |
+| object target leaving frame | **CONSTRAINED / hazard** | attitude + LED | device parks in mode 2 / sub 20 and hunts to limits (yaw −135°); needs a watchdog |
+| `aiGet/SetGestureParaR` (9 params) | **READBACK_VERIFIED** | read/write/restore | defaults: Gesture/TargetSelection/Zoom/Record/Snapshot/Rolling = true; DynamicZoom/Mirror = false; ZoomFactor 1.0 |
+| `aiGet/SetGestureTrackParaR` (9 params) | **READBACK_VERIFIED** | read/write/restore | Pan ±45 / Pitch ±30 / HandType 0 / TrackSpeed 5 / Pan+Pitch enabled / Rest 3s |
+| gesture ownership vs Agent | `evidence_insufficient` | — | no physical gesture performed; gestures are enabled by default ⇒ live competing intent source |
+| `cameraGet/SetAutoFocusModeR` | **READBACK_VERIFIED** | read/write/restore | 1 = AFC |
+| `cameraGet/SetAFCTrackModeR` | **READBACK_VERIFIED** | read/write/restore | 3 = Foreground |
+| `cameraGetFocusAbsolute` | **READBACK_VERIFIED** | readback | focus 0, auto_focus true |
+| `cameraGet/SetWhiteBalanceR` | **VERIFIED** | read/write + **visual** | tungsten preset produced a strong blue cast |
+| `cameraGet/SetWdrR` | `READBACK_VERIFIED` (async) | readback | readback lags several seconds after a revert |
+| `aiGetGimbalBootPosR` | **READBACK_VERIFIED** | readback | id 0, pose 0/0/0, zoom 1.0 |
+| `aiTrgGimbalBootPosR` | **VERIFIED** | readback | from yaw 10 / pitch 5 → exactly 0/0 |
+| `aiSetGimbalParaR` PanReverse (4) | **READBACK_VERIFIED** | read/write/restore | distinct from `aiSetGimbalYawDirReverseR` (which had no effect) |
+| `aiSetGimbalParaR` PresetSpeed (5) | **CONSTRAINED** | readback | 0.5 accepted, 2.0 silently ignored (readback stays 1.0) |
+| gimbal para limits (0–3) | **CONSTRAINED** | readback + physical | stored and read back, but do **not** clamp `aiSetGimbalMotorAngleR` |
+| `DevStatusCallback` | **VERIFIED** | event count/age | ~2 s cadence; 10 events after `nextRefreshDevStatus` |
+| `FastDevStatusCallback` | **UNSUPPORTED_TAIL2** | event count | 0 events in 50 s+ including fast refresh |
+| `cameraStatus()` | `ACCEPTED_UNPROVEN` | callable | returns the union; **layout not parsed** (no documented Tail2 payload) |
+| `Devices::setDevChangedCallback` | `ACCEPTED_UNPROVEN` | registration | registered; hotplug not exercised |
+| `aiGetLimitedZoneTrack*R` (6 getters) | **UNSUPPORTED_TAIL2** | rc | all rc = −1 |
+| `aiSetLimitedZoneTrack*R` | `evidence_insufficient` | rc | rc = 0 with no readback and no observed effect |
+
 ## 5. Open items handed to Wave B
 
 1. Behavioral effect of AI control 2/4/5/8/11/13/18–23 under a moving target (does
