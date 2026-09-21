@@ -1,69 +1,67 @@
 # 当前交接
 
-2026-09-20 · Tail2 Embodied Agent MVP
+2026-09-21 · Tail2 Embodied Agent MVP
 
-当前开发基线：`kickoff/embodied-m0-20260920 @ 3609199f13fc06e5a0af9c71d0723aa1421a3fec`。
+当前阶段：**M1 Capability Runtime**
 
-## 已完成
+开发分支：`m1/capability-runtime`
+阶段任务：Issue #8
+M0/M0.5 结项基线：`704b7fc2054e85d850ec2969964a17abc307cad3`
 
-M0 + M0.5 基础设施已合入：
+## M0/M0.5 已冻结结论
 
-- Windows x64 / 真 SDK 构建通过；本地报告 71/71，GitHub CI 四矩阵通过。
-- 单 UVC 属主 Observation Service；按设备名绑定，断线重连 bump `camera_epoch`。
-- frame-bound Observation / Candidate / Target 引用；Target 下发前校验 session / epoch / freshness / calibration / candidate membership。
-- `host_uvc` photo / record 基础实现；photo 严格取请求后的新帧。
-- localhost 只读预览页：preview、candidate、requested ROI、AI 状态、云台 last-good/stale。
-- bounded device discovery；gimbal getter 失败使用 last-good + stale。
-- Target Box / Center / Largest / Clicked、zoom、ai.control read probe 等已加入 native 探针。
-- `ai.control` 已改为文档化 allowlist；set 默认关闭。
-- SDK 能力底座：`../Tail2_CAPABILITY_MAP.md`。
+- Observation Runtime：PASS。单 UVC 属主，frame-bound Observation / Candidate / epoch。
+- Target/Track：PASS。Normal 下 Box 不启动跟踪；先进入 Track runtime，再 Box 具体目标。
+- Track entry：Center/Largest 或设备端手势；当前 canonical readback 为 `aiGetAiStatusR().ai_main_mode`。
+- ROI：当前 640×480 / 1x / 横向 profile 下 **identity VERIFIED**；双目标 target-switch 已排除 Center 假阳性。
+- Look/AI ownership：PASS。手动云台前关 AI，恢复跟随时显式恢复 AI/Track。
+- host_uvc media：基础 PASS；recording 跨 reconnect 收尾进入 M1。
+- Framing：显式 zoom 有效；TargetZoomType 视觉弱；已试 Offset 路径没有有效 Tail2 构图偏移结果。
+- Native candidate list / tracking bbox：无可用正式接口。
 
-真机关键发现：
+最终 M0.5 报告：
+`inbox/2026-09-20-m0-5-state-sequences.md`
 
-- `target.select(Box)` 被接受但不会自动进入 Track；Center/Largest 会把 `ai_main_mode` 置为 Track。
-- 设备端 Track 已开启时，目标运动会带动 yaw；SDK 侧 Track 启动语义仍需收敛。
-- `framing.set(Full/Half/Close)` 视觉变化弱；显式 zoom 真机有效。
-- Native candidate list 无可用正式接口；MVP 继续以 Host Detector 为主 Provider。
-- UVC 下 device-native Record 不进入 MVP 主链；默认 media Provider 为 `host_uvc`。
+原语映射：
+`../M1_PRIMITIVE_LAYER_NOTES.md`
 
-脱敏报告：
-- `inbox/2026-09-20-m0-windows.md`
-- `inbox/2026-09-20-m0-5-target-loop.md`
+M1 计划：
+`../M1_CAPABILITY_RUNTIME_PLAN.md`
 
-## 当前未完成的核心问题
+## M1 目标
 
-M0.5 的基础运行时成立，但下列产品语义仍未冻结：
+把已验证设备事实封装成正式中层原语：
 
-1. **Track enable**：设备端真正进入 Track 的可重复 SDK / 状态路径。
-2. **ROI mapping**：UVC → SDK ROI 的真实左/中/右、上/中/下现场标定。
-3. **Framing execution**：Full / Half / Close 应如何组合 auto zoom、composition、offset 与显式 zoom。
-4. **Agent Observation**：未来 Agent 必须使用 frame-bound Observation 原子对象；状态页 `preview.jpg + overlay` 仅用于观察，不是正式 Target 引用。
-5. **Media reconnect**：host_uvc recording 遇 camera_epoch 变化时需要 abort / finalize 规则。
+`Observation / Target / Track / Framing / Look / Capture / Record / Status / Stop`
 
-现在仍不能把 Target / Track / Framing 全部标成 Agent-ready。
+M1 不接模型。先让确定性脚本使用同一套 Capability 完成闭环，M2 再接多模态 Agent。
 
-## 本地 Agent 下一步
+## 第一轮：M1A
 
-Issue #4 继续，先做**只读实验**：
+只做 Runtime foundation：
 
-1. Human `ai.control.get` para 0–23：Normal 与设备端 Gesture Track 两态 dump + diff。
-2. 记录两态下 `ai_main_mode / ai_sub_mode / gimbal / zoom`。
-3. 四条窄序列：
-   - Normal → Box
-   - Normal → Center → Track → Box
-   - Normal → Largest → Track → Box
-   - Gesture Track → Box
-4. 只在上述结果明确后，再进入构图相关参数的单参数 GET → SET → Observe → Restore。
+1. CapabilityRequest / CapabilityResult / errors / lifecycle。
+2. task_id / request_id / continuation_id；正式支持 REOBSERVE_REQUIRED。
+3. StateRegistry：requested / sdk_reported / visual_check / artifact 分离。
+4. ResourceOwnership：DeviceWriter / LookOwner / MediaOwner。
+5. 单写者队列、cancel、deadline、indeterminate。
+6. native bridge timeout / exit 后显式 session rebuild。
+7. 保持现有 Observer / ObservationService / Bridge 可运行，先包住，不大爆炸重构。
 
-ROI 标定必须使用真实不同现场位置并记录实际 SDK 选中结果。当前 CalibrationStore 的 verified 视为受监督操作员门禁，不代表自动几何证明。
+M1A **不新增真机动作策略**。先把当前已经知道的动作放进正式 Runtime 边界。
 
-不要开始多模态 Agent、Application、网络视频路线或大范围 ai.control 写扫描。
+## 后续顺序
 
-## 进入 M1 的门槛
+- M1B：Target + Track 金链。
+- M1C：Look ownership + host_uvc reconnect。
+- M1D：centered Framing Solver。
+- M1E：无模型端到端脚本 + 状态页 trace。
 
-当以下两条有可重复结果后，网页端正式冻结 M1 Capability Runtime：
+## 本地 Agent 协作
 
-- 具体 Target 能在明确 Track state 下稳定被设备接管；
-- Framing 至少有一条可解释的执行路径并能用新 Observation 验证。
+本地 Agent 后续从各小 PR 的 exact HEAD 做真机回读；不直接在 kickoff 或 M1 主开发分支上混写。
 
-Issue #4：<https://github.com/xiangscream/tail2/issues/4>
+M1A 默认只需离线开发与测试。需要真机前由网页端明确给出 experiment matrix。
+
+Issue #8：
+<https://github.com/xiangscream/tail2/issues/8>
