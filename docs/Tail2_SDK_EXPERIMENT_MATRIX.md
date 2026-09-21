@@ -113,6 +113,40 @@ frame before/after; restore original. Ids map 1:1 to `DevControlParaType` index.
 | A4-E06 | `aiSetAiAutoZoomR` | Track active | enable, then disable | AI mode + zoom | auto framing behaviour | interaction with `AutoZoomMode`/`AutoZoomSpeed` | disable | 2 | |
 | A4-E07 | `ZoomParamType` digital zoom | only if a setter is located | — | — | — | — | — | 0 | |
 
+## Wave A results (executed 2026-09-21, Tail2 fw 7.2.9.41)
+
+Raw evidence: `.local/sdk-sweep/waveA-log.md` + `.local/sdk-sweep/*.png`.
+
+| id | verdict | evidence |
+|---|---|---|
+| A1-E01 | `READBACK_VERIFIED` | float overload required; Pan ±180, Pitch ±90, PanReverse 0, PresetSpeed 1.0, RollBias 0. Bool overload returns rc=0/false for every type. |
+| A1-E02 | `VERIFIED` | legacy attitude ≈ motor angles, intermittent `rc=-1` behaviour unchanged |
+| A1-E03 | `READBACK_VERIFIED` | euler + motor + angular velocity; motor = commanded |
+| A1-E04 | **`VERIFIED` (architecture-changing, 3 reps)** | `pitch 10 / yaw 20` → legacy 10.0/20.0, motor 10.0/20.0; `-10/-20` → −10/−20; `+15/0` → 15/0; visual confirmed |
+| A1-E05 | `VERIFIED` | native speed pan=5 ≈ −5.5°/s; **pan sign inverted vs legacy** |
+| A1-E06 | `VERIFIED` | native stop residual ≤0.01° over 1.5 s |
+| A1-E07 | `VERIFIED` | legacy 2×{5 dps, 500 ms} → yaw +4.69 (baseline) |
+| A1-E08 | `READBACK_VERIFIED` | preset list len 0 → recall untestable |
+| A1-E09 | `READBACK_VERIFIED` | id 0, pose 0/0/0, zoom 1.0 |
+| A1-E10 | `ACCEPTED_UNPROVEN / no observed effect` | PanReverse readback unchanged; direction unchanged on absolute and native-speed paths |
+| A1-E11 | `VERIFIED` | `gimbalSetSpeedPositionR(0,5,10, speeds 5)` → 5.0/9.98 |
+| A1-E12 | `CONSTRAINED` | under Track the absolute command is contended: yaw −23.95 → −19.18, never reached 25; `ai_main_mode` stayed 2; target stayed framed |
+| A2-E01…E24 | see truth map table | 23/24 writable (bool needs numeric 0/1); 5 `CONSTRAINED` (0–4 only); 15/17 `UNSUPPORTED_TAIL2` under PRO+Track+Composition |
+| A3-E01/E02 | `ACCEPTED_UNPROVEN / no observed effect` | 12 view values rc=0, `ai_sub_mode` and zoom unchanged |
+| A3-E03/E04 | `READBACK_VERIFIED` (state) / visual `ACCEPTED_UNPROVEN` | sub_mode 0/1/2/3/4 mapping; full-body vs close-up frames identical |
+| A3-E05 | not run | no target re-selection side effect observed to chase |
+| A4-E01 | `READBACK_VERIFIED` | zoom ≥1.0; range `{0,100,1,0,valid}` (unit space unresolved) |
+| A4-E02 | **`VERIFIED`** | 1.0→1.11 in ~5 s at speed 5 (slow async ramp), readback lags, restore verified |
+| A4-E03 | `CONSTRAINED / no-op` | relative-in from 1.0 left zoom at 1.0 for 7.5 s |
+| A4-E04 | `CONSTRAINED / no-op` | ratio=150 from 1.0 left zoom at 1.0 for 6 s |
+| A4-E05 | `CONSTRAINED / no-op` | zoom kept ramping after `cameraSetZoomStopR` (1.10→1.15→1.23) |
+| A4-E06 | `ACCEPTED_UNPROVEN` | enable/disable rc=0; no readback path |
+| A4-E07 | `NO_PUBLIC_PATH` | no digital-zoom setter located |
+
+Restore status: every exercised write was restored and re-read; the final device
+state was `ai_main_mode=0`, `ai_sub_mode=0`, zoom 1.0, gimbal 0/0, gimbal params at
+defaults, target cleared.
+
 ## Recording
 
 Raw evidence → `.local/sdk-sweep/` (frames, raw return payloads, LED notes).
