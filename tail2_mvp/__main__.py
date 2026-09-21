@@ -93,6 +93,7 @@ def main() -> int:
     c.add_argument("--allow-control", action="store_true")
     c.add_argument("--allow-legacy-probes", action="store_true")
     c.add_argument("--allow-control-writes", action="store_true")
+    c.add_argument("--command-file", type=Path)
     a = p.parse_args()
     try:
         if a.command == "probe":

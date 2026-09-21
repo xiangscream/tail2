@@ -106,3 +106,18 @@ class CalibrationStoreTests(unittest.TestCase):
         store.bind_camera_epoch(0)
         store.bind_camera_epoch(1)
         self.assertFalse(store.profile().verified)
+
+    def test_load_persisted_verified_profile(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "p.json").write_text(json.dumps({
+                "calibration_id": "p", "verified": True, "mirror_x": False, "rotation_deg": 0,
+                "zoom": 1.0, "geometry": {}, "selection_outcomes": {}, "camera_epoch": 0,
+                "width": 640, "height": 480}), encoding="utf-8")
+            profile = CalibrationStore(Path(directory)).load()
+            self.assertTrue(profile.verified)
+            self.assertEqual(profile.calibration_id, "p")
+            self.assertEqual(profile.width, 640)

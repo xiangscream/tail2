@@ -7,6 +7,7 @@ A session rebuild is hooked to Observer.invalidate so epoch-bound state
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Callable
@@ -28,6 +29,8 @@ class RuntimeHarness:
         self.ownership = ResourceOwnership()
         self.session = RuntimeSession(bridge_factory, state=self.state, ownership=self.ownership)
         calibration = CalibrationStore(calibration_dir) if calibration_dir else None
+        if calibration is not None:
+            calibration.load()
         self.observer = Observer(service, self.session.bridge, trace, calibration=calibration,
                                  control=control, legacy=legacy, conflicts=conflicts, clock=clock,
                                  allow_control_writes=allow_control_writes, session=self.session)
@@ -48,8 +51,18 @@ class RuntimeHarness:
         return self.call(capability, **kwargs).to_dict()
 
 
+def _capability_line(line: str, harness: "RuntimeHarness") -> dict:
+    request = json.loads(line)
+    capability = request.get("capability")
+    if capability == "shutdown":
+        return {"ok": True, "capability": "shutdown", "execution": "completed"}
+    result = harness.call(capability, request.get("args"), observation_id=request.get("observation_id"),
+                          deadline_s=request.get("deadline_s"), task_id=request.get("task_id", ""),
+                          caller=request.get("caller", "script"))
+    return {"ok": True, "capability": capability, "result": result.to_dict()}
+
+
 def run_capability(args) -> int:
-    import json
     import os
     import sys
     import threading
@@ -90,6 +103,34 @@ def run_capability(args) -> int:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         print(f"Capability runtime ready. Read-only page: http://127.0.0.1:{server.server_port}", file=sys.stderr)
         print("Commands are JSON lines: {capability, args, observation_id, deadline_s, task_id}.", file=sys.stderr)
+        command_file = getattr(args, "command_file", None)
+        if command_file:
+            response_path = Path(str(command_file) + ".responses.jsonl")
+            processed = 0
+            stop = threading.Event()
+            try:
+                while not stop.is_set():
+                    path = Path(command_file)
+                    if path.exists():
+                        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                        while processed < len(lines):
+                            line = lines[processed].strip()
+                            processed += 1
+                            if not line:
+                                continue
+                            record = _capability_line(line, harness)
+                            with response_path.open("a", encoding="utf-8") as handle:
+                                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            if record.get("capability") == "shutdown":
+                                stop.set()
+                                break
+                    stop.wait(0.3)
+            finally:
+                server.shutdown()
+                server.server_close()
+                harness.session.close()
+                service.stop()
+            return 0
         try:
             for line in sys.stdin:
                 if not line.strip():

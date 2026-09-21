@@ -100,11 +100,11 @@ class Tail2Adapter:
         return observation_id
 
     def _device_track(self, token, deadline) -> dict:
+        device = self._call("device.status", {}, token, deadline) or {}
+        mode = device.get("ai_main_mode_raw")
         status = self._call("status", {}, token, deadline) or {}
-        ai = status.get("ai", {}) or {}
-        mode = ai.get("ai_main_mode_raw")
-        runtime_mode = "track" if mode == 2 else "normal" if mode == 0 else "unknown"
         requested = (status.get("track", {}) or {}).get("requested")
+        runtime_mode = "track" if mode == 2 else "normal" if mode == 0 else "unknown"
         ai_requested = "enabled" if requested is True else "disabled" if requested is False else "unknown"
         return {"runtime_mode": runtime_mode, "ai_requested": ai_requested,
                 "follow_health": self.follow_health, "ai_main_mode_raw": mode,

@@ -39,7 +39,8 @@ def build(responses, *, stale=False):
 
 
 def status(mode, requested=True):
-    return {"ai": {"ai_main_mode_raw": mode}, "track": {"requested": requested}}
+    return {"device.status": {"ai_main_mode_raw": mode, "ai_sub_mode_raw": 0},
+            "status": {"track": {"requested": requested}}}
 
 
 TRACK_ENTER = {"entered": True, "ai_main_mode": 2, "reobserve_required": True}
@@ -47,7 +48,7 @@ TRACK_ENTER = {"entered": True, "ai_main_mode": 2, "reobserve_required": True}
 
 class TargetTrackTests(unittest.TestCase):
     def test_target_select_normal_prepares_track_and_reobserves(self):
-        runtime, observer = build({"status": status(0), "track.enter": TRACK_ENTER})
+        runtime, observer = build({**status(0), "track.enter": TRACK_ENTER})
         result = runtime.execute(CapabilityRequest("target.select", task_id="t1", observation_id="oA",
                                                    args={"candidate_id": "cA"}))
         self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
@@ -55,10 +56,11 @@ class TargetTrackTests(unittest.TestCase):
         self.assertEqual(result.payload["reason"], "track_runtime_entered")
         self.assertEqual(result.payload["previous_observation_id"], "oA")
         self.assertEqual(result.payload["required_next"], "reobserve_and_reground")
-        self.assertEqual([c["request"]["op"] for c in observer.calls], ["status", "track.enter"])
+        self.assertEqual([c["request"]["op"] for c in observer.calls],
+                         ["device.status", "status", "track.enter"])
 
     def test_target_select_in_track_boxes(self):
-        runtime, observer = build({"status": status(2), "target.select": {
+        runtime, observer = build({**status(2), "target.select": {
             "dispatch": "accepted", "side_effects": "UNVERIFIED", "calibration": {"verified": True},
             "requested_roi_sdk": [0.1, 0.2, 0.3, 0.4]}})
         result = runtime.execute(CapabilityRequest("target.select", observation_id="oA",
@@ -70,7 +72,7 @@ class TargetTrackTests(unittest.TestCase):
         self.assertEqual(result.sdk_reported["side_effects"], "UNVERIFIED")
 
     def test_stale_reference_touches_no_device(self):
-        runtime, observer = build({"status": status(0)}, stale=True)
+        runtime, observer = build(status(0), stale=True)
         result = runtime.execute(CapabilityRequest("target.select", observation_id="oX",
                                                    args={"candidate_id": "cX"}))
         self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
@@ -98,14 +100,14 @@ class TargetTrackTests(unittest.TestCase):
         self.assertEqual(result.payload["reason"], "track_runtime_entered")
 
     def test_track_status_mode_two_is_not_following(self):
-        runtime, _ = build({"status": status(2)})
+        runtime, _ = build(status(2))
         track = runtime.execute(CapabilityRequest("track.status")).payload["track"]
         self.assertEqual(track["runtime_mode"], "track")
         self.assertEqual(track["ai_requested"], "enabled")
         self.assertEqual(track["follow_health"], "unknown")
 
     def test_track_status_unknown_mode(self):
-        runtime, _ = build({"status": {"ai": {}, "track": {"requested": None}}})
+        runtime, _ = build({"device.status": {}, "status": {"track": {"requested": None}}})
         track = runtime.execute(CapabilityRequest("track.status")).payload["track"]
         self.assertEqual(track["runtime_mode"], "unknown")
         self.assertEqual(track["ai_requested"], "unknown")
@@ -117,14 +119,14 @@ class TargetTrackTests(unittest.TestCase):
         def look():
             return {"result": {"yaw_deg": next(seq)}}
 
-        runtime, _ = build({"status": status(2), "look.status": look})
+        runtime, _ = build({**status(2), "look.status": look})
         result = runtime.execute(CapabilityRequest("track.verify_follow", args={"samples": 4, "min_yaw_deg": 0.5}))
         self.assertEqual(result.execution, Execution.COMPLETED)
         self.assertEqual(result.visual_check["verdict"], "observed_following")
         self.assertEqual(result.payload["track"]["follow_health"], "observed_following")
 
     def test_follow_verification_requires_track(self):
-        runtime, _ = build({"status": status(0)})
+        runtime, _ = build(status(0))
         result = runtime.execute(CapabilityRequest("track.verify_follow"))
         self.assertEqual(result.execution, Execution.FAILED)
 

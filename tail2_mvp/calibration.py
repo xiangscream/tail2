@@ -102,6 +102,36 @@ class CalibrationStore:
     def profile(self) -> RoiCalibration:
         return self._profile
 
+    def load(self, calibration_id: str | None = None) -> RoiCalibration | None:
+        if not self.directory or not self.directory.exists():
+            return None
+        candidates = []
+        for path in sorted(self.directory.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if calibration_id and data.get("calibration_id") != calibration_id:
+                continue
+            if not data.get("verified"):
+                continue
+            if data.get("calibration_id") in (None, "", "unverified"):
+                continue
+            candidates.append((path.stat().st_mtime, data))
+        if not candidates:
+            return None
+        _, data = max(candidates, key=lambda item: item[0])
+        self._profile = RoiCalibration(
+            calibration_id=data.get("calibration_id", "loaded"), verified=True,
+            mirror_x=bool(data.get("mirror_x", False)), rotation_deg=int(data.get("rotation_deg", 0)),
+            crop=tuple(data["crop"]) if data.get("crop") else None, zoom=float(data.get("zoom", 1.0)),
+            note=data.get("note", "loaded"), camera_epoch=data.get("camera_epoch"),
+            width=data.get("width"), height=data.get("height"))
+        self._geometry = dict(data.get("geometry") or {})
+        self._outcomes = dict(data.get("selection_outcomes") or {})
+        self._camera_epoch = self._profile.camera_epoch
+        return self._profile
+
     def set_profile(self, *, calibration_id: str, mirror_x: bool = False, rotation_deg: int = 0,
                     crop=None, zoom: float = 1.0, note: str = "", camera_epoch: int | None = None,
                     width: int | None = None, height: int | None = None) -> RoiCalibration:
