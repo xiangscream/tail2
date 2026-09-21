@@ -2,7 +2,7 @@
 
 2026-09-21 · Tail2 Embodied Agent MVP
 
-当前阶段：**M1 Capability Runtime / M1B Target + Track**
+当前阶段：**M1 Capability Runtime / M1B Target + Track（真机 B0→B6 完成）**
 
 开发分支：`m1/capability-runtime`
 主任务：Issue #8
@@ -57,6 +57,17 @@ M1A 报告：
 7. caller/test script 不出现 SDK 名。
 
 完整开发与真机矩阵见 Issue #11。
+
+## M1B 真机结果（2026-09-21）
+
+`B0/B1/B2/B3/B4` 真机 PASS，`B5/B6` fake/host path PASS。金链在真机走通；Track 内 `target.select` 切换目标全程 `completed`、不重进 Track / 不 reobserve。
+
+真机新增限制（详见 `inbox/2026-09-21-m1b-target-track.md`）：
+
+- human 框选在框内无可检测人脸/头时静默 no-op（返回 `completed` 但云台零位移）。
+- 目标身份由设备 AI 决定；`selection=center/largest` 会锁画面中心/最大的人，漂移后可误锁旁人。
+- `look.stop` 后手动云台不再动作（黄→紫灯），需经 `track.start` 重启用 AI 才恢复；`look.nudge` 钳制 `±10 dps / ≤500ms`。
+- `requested_roi` 是选择帧坐标语义，设备重构图后与目标错位，勿当实时跟踪框。
 
 ## M1B 真机纪律
 
