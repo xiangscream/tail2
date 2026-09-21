@@ -142,7 +142,17 @@ Observation A
 | top | (0.494,0.235) | cy 0.261→0.304 | ✅ |
 | bottom | (0.484,0.766) | cy 0.558→0.330 | ✅ |
 
-`calibration.verify` → `verified=true, mirror_x=false, rotation_deg=0`（4 outcomes）。**identity 由 4 个 SDK 选中结果验证，不再是候选。**
+`calibration.verify` → `verified=true, mirror_x=false, rotation_deg=0`（4 outcomes）。
+
+**但单目标不隔离 Box 因果**（`Center` 已跟随唯一目标）。已用**双目标 target-switch** 补齐（画面同框两个物体：左=饮料瓶、右=眼镜盒，`class=common`）：
+
+- `Center(common)` → `ai_main_mode=2`；
+- `Box 右侧眼镜盒` → yaw **-98.8 → -126.7/-123.4**（云台右移切到盒子）；
+- `Box 左侧饮料瓶` → yaw 回 **-100.3**，瓶子被居中到 **(0.44,0.64)**，盒子不再居中。
+
+两个目标同时在场时“Box 谁就切到谁”，且方向一致 ⇒ **identity VERIFIED（双目标切换）。**
+
+**物体框选+跟踪的 SDK 映射**（对应 App“先框选物体再跟踪”）：先进入 Track（对物体用 `aiSetSelectedTargetR(selection_type=Center/Largest, class_type=Common)`，`ai_main_mode=2`），再 `aiSetSelectedTargetR(selection_type=Box, class_type=Common, zoom_type=Normal, location.roi)`。
 
 **构图偏移（跟踪时目标不居中）尝试**：
 - `aiSetControlParaR(OffsetX/OffsetY, Composition)`：改值对目标 cx/cy **无可见影响**。

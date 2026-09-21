@@ -99,7 +99,7 @@
 
 ## 4. 尚未解决 / M1 需回答
 
-- UVC→SDK ROI 的**严格映射验证**需**双目标**（单目标不可判）；当前 identity 为 STRONG CANDIDATE。
+- UVC→SDK ROI 映射：**已用双目标 target-switch 验证为 identity**（两个物体同框，Box 谁就切到谁）。单目标不隔离 `Center` 因果。物体“框选+跟踪”=`aiSetSelectedTargetR(Box, class=Common)` 且需先在 Track。
 - Framing 的 `aiSetControlParaR`（Offset/AutoZoom/Composition）**语义与单位未知**，实测无可见效果。
 - 设备端跟踪开关（手势/App）与 SDK `aiSetEnabledR`/`ai_main_mode` 的完整状态机与“跟随健康”判定。
 - 退 Track 的可靠手段（会话重建是否等价于复位）。
