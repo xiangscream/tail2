@@ -113,21 +113,22 @@ class TargetTrackTests(unittest.TestCase):
         self.assertEqual(track["ai_requested"], "unknown")
         self.assertTrue(track["stale"])
 
-    def test_follow_verification_sets_observed_following(self):
+    def test_motion_evidence_does_not_claim_following(self):
         seq = iter([-1.0, -1.4, -0.6, -0.2])
 
         def look():
             return {"result": {"yaw_deg": next(seq)}}
 
         runtime, _ = build({**status(2), "look.status": look})
-        result = runtime.execute(CapabilityRequest("track.verify_follow", args={"samples": 4, "min_yaw_deg": 0.5}))
+        result = runtime.execute(CapabilityRequest("track.motion_evidence", args={"samples": 4, "min_yaw_deg": 0.5}))
         self.assertEqual(result.execution, Execution.COMPLETED)
-        self.assertEqual(result.visual_check["verdict"], "observed_following")
-        self.assertEqual(result.payload["track"]["follow_health"], "observed_following")
+        self.assertIsNone(result.visual_check)
+        self.assertEqual(result.payload["motion_evidence"]["verdict"], "gimbal_response_observed")
+        self.assertEqual(result.payload["track"]["follow_health"], "unknown")
 
-    def test_follow_verification_requires_track(self):
+    def test_motion_evidence_requires_track(self):
         runtime, _ = build(status(0))
-        result = runtime.execute(CapabilityRequest("track.verify_follow"))
+        result = runtime.execute(CapabilityRequest("track.motion_evidence"))
         self.assertEqual(result.execution, Execution.FAILED)
 
     def test_task_cancel_cancels_all_requests_in_task(self):
