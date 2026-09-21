@@ -69,6 +69,10 @@ class ObservationStore:
     def get(self, observation_id: str) -> ObservationRecord | None:
         return self._items.get(observation_id)
 
+    def clear(self) -> None:
+        self._items.clear()
+        self._order.clear()
+
     def validate(self, observation_id: str, *, stream_session: str, camera_epoch: int,
                  now_mono: float, max_age_s: float, calibration_id: str) -> ObservationRecord:
         record = self.get(observation_id)
