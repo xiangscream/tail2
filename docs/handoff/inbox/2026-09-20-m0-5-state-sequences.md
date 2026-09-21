@@ -147,4 +147,5 @@ Observation A
 **构图偏移（跟踪时目标不居中）尝试**：
 - `aiSetControlParaR(OffsetX/OffsetY, Composition)`：改值对目标 cx/cy **无可见影响**。
 - tail air `aiSetHorizontalOffset` / `aiSetVerticalOffset`（新增探针 `ai.offset`）：同样**无可见偏移**。
-- 结论：Tail2 上**构图偏移在已试文档化 SDK 接口中不可得**；可能仅官方 App 内部路径，或需 M1 Framing 专项。→ 列为 M1 待解决。
+- 追加：`aiGetHorizontalOffset/VerticalOffset/AutoOffset` 在 Tail2 上 **rc=-1（不支持）**；setter `aiSetHorizontalOffset/VerticalOffset` rc=0 但**无 getter 可核对，且改值（±0.2/±0.4）无可见位置变化**。
+- 结论：无法证实“offset 叠加到 bbox”（叠加后 ≤1）的假设；Tail2 上**构图偏移在已试文档化 SDK 接口中不可得**。可能仅官方 App 内部路径，或需 M1 Framing 专项。→ 列为 M1 待解决。

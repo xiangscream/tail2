@@ -441,7 +441,7 @@ class Observer:
             if not response.get("ok"):
                 raise RuntimeError(response.get("error", "ai.control.set rejected"))
             return response.get("result", {})
-        if op in ("camera.face_ae", "camera.exposure_mode", "camera.ev_bias", "ai.offset"):
+        if op in ("camera.face_ae", "camera.exposure_mode", "camera.ev_bias", "ai.offset", "ai.offset.get"):
             self._require_control()
             self._require_legacy()
             response = self._call(op, args)
