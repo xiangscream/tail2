@@ -116,8 +116,17 @@ Observation A
 探针已据此收紧：`target.select(Box)` 在未处于 Track（`ai_main_mode != 2`）时**直接拒绝**并提示“enter Track → 等 mode=2 → REOBSERVE → Box”；进入 Track 用 `track.enter`。
 
 ## 6. 注意与待收紧
-
 - 快照帧上的 face 检测**偶发为空**（后台检测器有、同步快照帧没有），本轮空候选时使用 **agent_box fallback**。
 - 状态页 `preview`+`overlay` 仍只是展示，不作为正式 Agent Observation（正式走 frame-bound Observation 原子对象）。
 - `host_uvc` recording 跨 UVC reconnect 的 abort/finalize + epoch reason 仍未补。
 - 本次几何标定为 640×480、1x、横向模式；**镜像/竖屏/裁切/变焦变化后需重新标定**（当前实现靠 `camera_epoch` 与 profile 变更失效，尚未覆盖手持重装等未上报变化）。
+
+## 7. 跟踪开关：手动 Look 后必须恢复 AI（关键修复）
+
+`dev.hpp` 对 `aiSetEnabledR` 明确写：使用 `aiSetGimbalSpeedCtrlR` 手动控制云台前要**先关 AI**，**控制结束后必须再把 AI 打开**。
+
+- 探针的 `look.stop` / `look.nudge` 只调用了 `aiSetEnabledR(false)`，**从未恢复**；因此每次手动 Look 后设备进入“**蓝灯但 AI 关闭、不跟随**”状态，且 `Center` 只把 `ai_main_mode` 置 2 也不会真正跟随。
+- 正确序列（实测）：`aiSetEnabledR(true)` → `Center`（进入 Track，mode=2）→ 目标移动时 **yaw 明显跟随**（-82.34→-88.40→-92.77→-70.59），目标 cx 保持有界（0.35–0.61）⇒ **跟随成立且方向为 identity**。
+- 结论：M1 的 `look` 原语在手动动作结束后**必须显式恢复 Track/AI**（`track.start` / `aiSetEnabledR(true)`）；`ai_main_mode=2` 单独不代表正在跟随。
+
+这也解释了本轮之前反复出现的“卡死/不跟随”。
