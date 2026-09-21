@@ -16,7 +16,7 @@ class FakeFrame:
 
 
 class FakeSource:
-    def __init__(self, frames=100000):
+    def __init__(self, frames=None):
         self.frames = frames
         self.count = 0
         self.opened = False
@@ -29,7 +29,7 @@ class FakeSource:
 
     def read(self):
         with self._lock:
-            if self.count >= self.frames:
+            if self.frames is not None and self.count >= self.frames:
                 return False, None
             self.count += 1
             return True, FakeFrame(self.count)
