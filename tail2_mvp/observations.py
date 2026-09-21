@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from math import isfinite
 from typing import Any
 
+from .runtime import ReobserveRequired
 
-class ReobserveRequired(RuntimeError):
-    """The reference is stale, from another epoch/session, or has no such candidate."""
+__all__ = ["ReobserveRequired", "ObservedCandidate", "ObservationRecord", "ObservationStore",
+           "record_from_snapshot"]
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from .bridge import Bridge, BridgeError
 from .events import Trace
 from .observation import capture_snapshot
 from .observer import run_observer
+from .harness import run_capability
 from .status import serve
 
 
@@ -75,6 +76,23 @@ def main() -> int:
     o.add_argument("--allow-control", action="store_true")
     o.add_argument("--allow-legacy-probes", action="store_true")
     o.add_argument("--allow-control-writes", action="store_true")
+    c = sub.add_parser("capability", help="M1 capability runtime entry (product capabilities only)")
+    c.add_argument("--bridge", type=Path, required=True)
+    c.add_argument("--trace", type=Path, required=True)
+    c.add_argument("--index", type=int)
+    c.add_argument("--backend", choices=["dshow", "msmf", "v4l2", "any"], required=True)
+    c.add_argument("--device-name")
+    c.add_argument("--out", type=Path, default=Path(".local/service"))
+    c.add_argument("--serial")
+    c.add_argument("--width", type=int)
+    c.add_argument("--height", type=int)
+    c.add_argument("--preview-width", type=int, default=640)
+    c.add_argument("--port", type=int, default=0)
+    c.add_argument("--discover-timeout", type=float, default=15.0)
+    c.add_argument("--per-call-wait-ms", type=int, default=1500)
+    c.add_argument("--allow-control", action="store_true")
+    c.add_argument("--allow-legacy-probes", action="store_true")
+    c.add_argument("--allow-control-writes", action="store_true")
     a = p.parse_args()
     try:
         if a.command == "probe":
@@ -87,6 +105,12 @@ def main() -> int:
             if a.index is None and not a.device_name:
                 p.error("provide --index or --device-name")
             return run_observer(a)
+        elif a.command == "capability":
+            if not 0 <= a.port <= 65535:
+                p.error("port out of range")
+            if a.index is None and not a.device_name:
+                p.error("provide --index or --device-name")
+            return run_capability(a)
         else:
             if not 0 <= a.port <= 65535:
                 p.error("port out of range")

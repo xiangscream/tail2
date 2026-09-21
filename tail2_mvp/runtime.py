@@ -47,11 +47,13 @@ class DeadlineExceeded(RuntimeError_):
 
 
 class ReobserveRequired(RuntimeError_):
-    def __init__(self, reason: str, continuation_id: str, requested: dict | None = None):
+    def __init__(self, reason: str, continuation_id: str = "unknown", requested: dict | None = None,
+                 payload: dict | None = None):
         super().__init__(reason)
         self.reason = reason
         self.continuation_id = continuation_id
         self.requested = requested or {}
+        self.payload = payload or {"reason": reason, "required_next": "reobserve_and_reground"}
 
 
 class ResourceBusy(RuntimeError_):
@@ -348,7 +350,7 @@ class CapabilityRuntime:
             return self._from_output(request, output)
         except ReobserveRequired as exc:
             return self._result(request, Execution.REOBSERVE_REQUIRED, requested=exc.requested,
-                                continuation_id=exc.continuation_id,
+                                continuation_id=exc.continuation_id, payload=exc.payload,
                                 errors=[CapabilityError("reobserve_required", str(exc))])
         except Cancelled:
             return self._result(request, Execution.CANCELLED, errors=[CapabilityError("cancelled", "cancelled")])

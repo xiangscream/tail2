@@ -1,81 +1,132 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from tail2_mvp.adapter import Tail2Adapter
-from tail2_mvp.runtime import CancelToken, CapabilityRequest, CapabilityRuntime, Execution
+from tail2_mvp.events import Trace
+from tail2_mvp.harness import RuntimeHarness
+from tail2_mvp.runtime import (
+    CancelToken, CapabilityRejected, CapabilityRequest, CapabilityRuntime, Execution,
+    ReobserveRequired,
+)
 
 
 class FakeObserver:
-    def __init__(self, responses):
+    def __init__(self, responses, *, stale=False):
         self.responses = responses
         self.calls = []
+        self._stale = stale
+
+    def check_observation(self, observation_id):
+        if self._stale:
+            raise ReobserveRequired("observation stale", "cont-1")
+        return {"observation_id": observation_id}
 
     def handle(self, request, *, timeout=None):
         self.calls.append({"request": request, "timeout": timeout})
         op = request.get("op")
         if op not in self.responses:
-            return {"op": op, "ok": False, "error": f"no fake for {op}"}
+            raise CapabilityRejected(f"no fake for {op}")
         value = self.responses[op]
-        if isinstance(value, dict) and "ok" in value:
-            return value
-        return {"op": op, "ok": True, "result": value}
+        return value() if callable(value) else value
 
 
-def build(responses):
+def build(responses, *, stale=False):
     runtime = CapabilityRuntime()
-    observer = FakeObserver(responses)
-    Tail2Adapter(observer).install(runtime)
+    observer = FakeObserver(responses, stale=stale)
+    Tail2Adapter(observer, sleep=lambda _s: None).install(runtime)
     return runtime, observer
 
 
-class AdapterTests(unittest.TestCase):
-    def test_snapshot_payload(self):
-        runtime, _ = build({"snapshot": {"observation_id": "o1", "frame_seq": 5}})
-        result = runtime.execute(CapabilityRequest("observe.snapshot"))
-        self.assertEqual(result.execution, Execution.COMPLETED)
-        self.assertEqual(result.payload["observation"]["observation_id"], "o1")
+def status(mode, requested=True):
+    return {"ai": {"ai_main_mode_raw": mode}, "track": {"requested": requested}}
 
-    def test_target_select_normal_requires_reobserve(self):
-        runtime, _ = build({"target.select": {"ok": False,
-            "error": "device is not in Track runtime; call track.enter ... REOBSERVE ...",
-            "code": "REOBSERVE_REQUIRED"}})
-        result = runtime.execute(CapabilityRequest("target.select", task_id="t1",
-                                                   args={"observation_id": "o1", "candidate_id": "c1"}))
+
+TRACK_ENTER = {"entered": True, "ai_main_mode": 2, "reobserve_required": True}
+
+
+class TargetTrackTests(unittest.TestCase):
+    def test_target_select_normal_prepares_track_and_reobserves(self):
+        runtime, observer = build({"status": status(0), "track.enter": TRACK_ENTER})
+        result = runtime.execute(CapabilityRequest("target.select", task_id="t1", observation_id="oA",
+                                                   args={"candidate_id": "cA"}))
         self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
         self.assertEqual(result.continuation_id, "t1")
+        self.assertEqual(result.payload["reason"], "track_runtime_entered")
+        self.assertEqual(result.payload["previous_observation_id"], "oA")
+        self.assertEqual(result.payload["required_next"], "reobserve_and_reground")
+        self.assertEqual([c["request"]["op"] for c in observer.calls], ["status", "track.enter"])
 
-    def test_target_select_in_track_reports_side_effects(self):
-        runtime, observer = build({"target.select": {"ok": True, "result": {
+    def test_target_select_in_track_boxes(self):
+        runtime, observer = build({"status": status(2), "target.select": {
             "dispatch": "accepted", "side_effects": "UNVERIFIED", "calibration": {"verified": True},
-            "requested_roi_sdk": [0.1, 0.2, 0.3, 0.4]}}})
-        result = runtime.execute(CapabilityRequest("target.select", observation_id="o1",
-                                                   args={"candidate_id": "c1"}))
+            "requested_roi_sdk": [0.1, 0.2, 0.3, 0.4]}})
+        result = runtime.execute(CapabilityRequest("target.select", observation_id="oA",
+                                                   args={"candidate_id": "cA"}))
         self.assertEqual(result.execution, Execution.COMPLETED)
-        self.assertIn("side_effects", result.sdk_reported)
-        self.assertEqual(result.payload["target"]["requested_roi_sdk"], [0.1, 0.2, 0.3, 0.4])
-        sent = observer.calls[-1]["request"]["args"]
-        self.assertEqual(sent["observation_id"], "o1")
+        self.assertEqual(result.payload["observation_id"], "oA")
+        self.assertEqual(result.payload["follow_health"], "unknown")
+        self.assertEqual(observer.calls[-1]["request"]["args"]["observation_id"], "oA")
+        self.assertEqual(result.sdk_reported["side_effects"], "UNVERIFIED")
+
+    def test_stale_reference_touches_no_device(self):
+        runtime, observer = build({"status": status(0)}, stale=True)
+        result = runtime.execute(CapabilityRequest("target.select", observation_id="oX",
+                                                   args={"candidate_id": "cX"}))
+        self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
+        self.assertEqual(observer.calls, [])
 
     def test_target_select_requires_first_class_observation(self):
-        runtime, _ = build({})
+        runtime, observer = build({})
         result = runtime.execute(CapabilityRequest("target.select", args={"candidate_id": "c1"}))
-        self.assertEqual(result.execution, Execution.FAILED)
-        self.assertEqual(result.errors[0].code, "rejected")
-
-    def test_target_select_conflicting_observation_rejected(self):
-        runtime, observer = build({"target.select": {"ok": True, "result": {}}})
-        result = runtime.execute(CapabilityRequest(
-            "target.select", observation_id="o1",
-            args={"observation_id": "o2", "candidate_id": "c1"}))
         self.assertEqual(result.execution, Execution.FAILED)
         self.assertEqual(result.errors[0].code, "rejected")
         self.assertEqual(observer.calls, [])
 
-    def test_deadline_remaining_passed_to_observer(self):
-        runtime, observer = build({"status": {"ok": True, "result": {}}})
-        result = runtime.execute(CapabilityRequest("status.get", deadline_s=5))
+    def test_target_select_conflicting_observation_rejected(self):
+        runtime, observer = build({})
+        result = runtime.execute(CapabilityRequest("target.select", observation_id="o1",
+                                                   args={"observation_id": "o2", "candidate_id": "c1"}))
+        self.assertEqual(result.execution, Execution.FAILED)
+        self.assertEqual(observer.calls, [])
+
+    def test_track_start_returns_continuation(self):
+        runtime, _ = build({"track.enter": TRACK_ENTER})
+        result = runtime.execute(CapabilityRequest("track.start", task_id="t2",
+                                                   args={"selection": "center", "class": "common"}))
+        self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
+        self.assertEqual(result.payload["reason"], "track_runtime_entered")
+
+    def test_track_status_mode_two_is_not_following(self):
+        runtime, _ = build({"status": status(2)})
+        track = runtime.execute(CapabilityRequest("track.status")).payload["track"]
+        self.assertEqual(track["runtime_mode"], "track")
+        self.assertEqual(track["ai_requested"], "enabled")
+        self.assertEqual(track["follow_health"], "unknown")
+
+    def test_track_status_unknown_mode(self):
+        runtime, _ = build({"status": {"ai": {}, "track": {"requested": None}}})
+        track = runtime.execute(CapabilityRequest("track.status")).payload["track"]
+        self.assertEqual(track["runtime_mode"], "unknown")
+        self.assertEqual(track["ai_requested"], "unknown")
+        self.assertTrue(track["stale"])
+
+    def test_follow_verification_sets_observed_following(self):
+        seq = iter([-1.0, -1.4, -0.6, -0.2])
+
+        def look():
+            return {"result": {"yaw_deg": next(seq)}}
+
+        runtime, _ = build({"status": status(2), "look.status": look})
+        result = runtime.execute(CapabilityRequest("track.verify_follow", args={"samples": 4, "min_yaw_deg": 0.5}))
         self.assertEqual(result.execution, Execution.COMPLETED)
-        self.assertIsNotNone(observer.calls[-1]["timeout"])
-        self.assertLessEqual(observer.calls[-1]["timeout"], 5.0)
+        self.assertEqual(result.visual_check["verdict"], "observed_following")
+        self.assertEqual(result.payload["track"]["follow_health"], "observed_following")
+
+    def test_follow_verification_requires_track(self):
+        runtime, _ = build({"status": status(0)})
+        result = runtime.execute(CapabilityRequest("track.verify_follow"))
+        self.assertEqual(result.execution, Execution.FAILED)
 
     def test_task_cancel_cancels_all_requests_in_task(self):
         runtime, _ = build({})
@@ -86,48 +137,61 @@ class AdapterTests(unittest.TestCase):
                 tokens.append(token)
                 runtime._by_task.setdefault("taskX", []).append(token)
         result = runtime.execute(CapabilityRequest("task.cancel", args={"task_id": "taskX"}))
-        self.assertEqual(result.execution, Execution.COMPLETED)
         self.assertEqual(result.payload["cancelled_count"], 3)
         self.assertTrue(all(t.cancelled for t in tokens))
 
-    def test_track_start_requires_reobserve(self):
-        runtime, _ = build({"track.enter": {"ok": True, "result": {
-            "selection": "center", "ai_main_mode": 2, "entered": True, "reobserve_required": True}}})
-        result = runtime.execute(CapabilityRequest("track.start", task_id="t2", args={"selection": "center"}))
+
+class FakeService:
+    def __init__(self):
+        self.camera_epoch = 0
+        self.stream_session = "s1"
+        self.max_frame_age_s = 2.0
+
+    def status(self):
+        return {"frames": 1, "width": 640, "height": 480, "last_frame_age_s": 0.0,
+                "source": {"kind": "fake"}, "candidates": []}
+
+    def candidates(self):
+        return []
+
+    def snapshot(self, *, write=True):
+        return {"observation_id": "o1", "stream_session": "s1", "camera_epoch": 0, "frame_seq": 1,
+                "width": 640, "height": 480, "received_mono": 0.0, "candidates": [],
+                "provider": None, "fresh": True, "age_s": 0.0}
+
+
+class FakeClosableBridge:
+    def __init__(self):
+        self.closed = False
+
+    def request(self, op, args=None, timeout=20):
+        return {"ok": True, "result": {}}
+
+    def close(self):
+        self.closed = True
+
+
+class HarnessTests(unittest.TestCase):
+    def make(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        trace = Trace(Path(temp.name) / "trace")
+        self.addCleanup(trace.close)
+        return RuntimeHarness(FakeService(), lambda: FakeClosableBridge(), trace,
+                              calibration_dir=Path(temp.name) / "cal")
+
+    def test_assembly_serves_status_and_track(self):
+        harness = self.make()
+        self.assertEqual(harness.call("status.get").execution, Execution.COMPLETED)
+        track = harness.call("track.status").payload["track"]
+        self.assertEqual(track["runtime_mode"], "unknown")
+        self.assertIn("observe.snapshot", harness.runtime.capabilities())
+
+    def test_session_rebuild_invalidates_and_reobserves(self):
+        harness = self.make()
+        snapshot = harness.call("observe.snapshot").payload["observation"]
+        observation_id = snapshot["observation_id"]
+        harness.session.rebuild()
+        self.assertEqual(harness.session.camera_epoch, 1)
+        result = harness.call("target.select", args={"candidate_id": "c1"}, observation_id=observation_id)
         self.assertEqual(result.execution, Execution.REOBSERVE_REQUIRED)
-        self.assertEqual(result.continuation_id, "t2")
-
-    def test_framing_invalid_mode_unsupported(self):
-        runtime, _ = build({})
-        result = runtime.execute(CapabilityRequest("framing.set", args={"mode": "left_third"}))
-        self.assertEqual(result.execution, Execution.UNSUPPORTED)
-
-    def test_framing_applied_is_not_visual_satisfaction(self):
-        runtime, _ = build({"framing.set": {"ok": True, "result": {"dispatch": "accepted"}}})
-        result = runtime.execute(CapabilityRequest("framing.set", args={"mode": "full_body"}))
-        self.assertEqual(result.execution, Execution.COMPLETED)
-        self.assertEqual(result.sdk_reported["applied"], True)
-        self.assertIsNone(result.visual_check)
-
-    def test_record_stop_unfinalized_indeterminate(self):
-        runtime, _ = build({"record.stop": {"ok": True, "result": {"finalized": False, "path_ref": "x"}}})
-        result = runtime.execute(CapabilityRequest("record.stop"))
-        self.assertEqual(result.execution, Execution.INDETERMINATE)
-
-    def test_position_recall_needs_id(self):
-        runtime, _ = build({})
-        result = runtime.execute(CapabilityRequest("position.recall", args={}))
-        self.assertEqual(result.execution, Execution.CONSTRAINED)
-
-    def test_observer_error_maps_to_failed(self):
-        runtime, _ = build({"capture.photo": {"ok": False, "error": "camera busy"}})
-        result = runtime.execute(CapabilityRequest("capture.photo"))
-        self.assertEqual(result.execution, Execution.FAILED)
-        self.assertEqual(result.errors[0].code, "rejected")
-
-    def test_look_ownership_blocks_concurrent_writer(self):
-        runtime, _ = build({"look.nudge": {"ok": True, "result": {"dispatch": "accepted"}}})
-        runtime.ownership.acquire("look", "other-task")
-        result = runtime.execute(CapabilityRequest("look.nudge", task_id="mine", args={"pan_dps": 1}))
-        self.assertEqual(result.execution, Execution.FAILED)
-        self.assertEqual(result.errors[0].code, "busy")

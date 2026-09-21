@@ -64,9 +64,10 @@ class Observer:
     def __init__(self, service: ObservationService, bridge: Bridge, trace: Trace, *,
                  calibration: CalibrationStore | None = None, control: bool = False, legacy: bool = False,
                  conflicts: list[str] | None = None, clock=time.monotonic, gimbal_stale_s: float = 3.0,
-                 allow_control_writes: bool = False):
+                 allow_control_writes: bool = False, session=None):
         self.service = service
         self.bridge = bridge
+        self.session = session
         self.trace = trace
         self.calibration = calibration or CalibrationStore()
         self.observations = ObservationStore()
@@ -100,6 +101,8 @@ class Observer:
         if resolved is None:
             resolved = 20.0
         resolved = max(0.05, min(60.0, resolved))
+        if self.session is not None:
+            return self.session.request(op, args or {}, timeout=resolved)
         return self.bridge.request(op, args or {}, timeout=resolved)
 
     def _record_ai(self, result: dict) -> None:
@@ -116,6 +119,13 @@ class Observer:
                 self.requested_roi = None
                 self.requested_roi_sdk = None
                 self.selected = None
+
+    def check_observation(self, observation_id: str):
+        self._sync_epoch()
+        return self.observations.validate(observation_id, stream_session=self.service.stream_session,
+                                          camera_epoch=self.service.camera_epoch, now_mono=self.clock(),
+                                          max_age_s=self.service.max_frame_age_s,
+                                          calibration_id=self.calibration.calibration_id)
 
     def invalidate(self, reason: str = "session rebuild") -> None:
         self.observations.clear()
@@ -158,9 +168,11 @@ class Observer:
             return response["result"].get("ai_main_mode_raw")
         return None
 
-    def _enter_track(self, selection: str = "center", attempts: int = 20) -> dict:
+    def _enter_track(self, selection: str = "center", target_class: str = "human",
+                     attempts: int = 20) -> dict:
+        self.track_set({"enabled": True})
         snapshot = self.service.snapshot(write=False)
-        response = self._call("target.select", {"class": "human", "selection": selection,
+        response = self._call("target.select", {"class": target_class, "selection": selection,
                                                 "observation_id": snapshot["observation_id"]})
         if not response.get("ok"):
             raise RuntimeError(response.get("error", "track enter rejected"))
@@ -170,15 +182,18 @@ class Observer:
             if mode == 2:
                 break
             time.sleep(0.3)
-        return {"selection": selection, "ai_main_mode": mode, "entered": mode == 2,
-                "reobserve_required": True}
+        return {"selection": selection, "class": target_class, "ai_main_mode": mode,
+                "entered": mode == 2, "reobserve_required": True}
 
     def track_enter(self, args: dict) -> dict:
         self._require_control()
         selection = args.get("selection", "center")
         if selection not in ("center", "largest"):
             raise ValueError("track.enter selection must be center or largest")
-        return self._enter_track(selection)
+        target_class = args.get("class", "human")
+        if target_class not in TARGET_CLASSES:
+            raise ValueError("unsupported target class")
+        return self._enter_track(selection, target_class)
 
     def _observe_target(self, attempts: int = 10):
         for _ in range(attempts):
@@ -437,6 +452,21 @@ class Observer:
             return self.service.record_start(fps=float(args.get("fps", 30.0)))
         if op == "record.stop":
             return self.service.record_stop()
+        if op == "position.list":
+            self._require_legacy()
+            response = self._call("position.list")
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", "position.list failed"))
+            return response.get("result", {})
+        if op == "position.recall":
+            self._require_control()
+            self._require_legacy()
+            if "id" not in args:
+                raise ValueError("id required")
+            response = self._call("position.recall", {"id": int(args["id"])})
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", "position.recall failed"))
+            return response.get("result", {})
         if op in ("ai.select_biggest", "ai.select_central"):
             self._require_control()
             self._require_legacy()
