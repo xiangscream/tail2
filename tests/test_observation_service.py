@@ -16,7 +16,7 @@ class FakeFrame:
 
 
 class FakeSource:
-    def __init__(self, frames=100000):
+    def __init__(self, frames=None):
         self.frames = frames
         self.count = 0
         self.opened = False
@@ -29,7 +29,7 @@ class FakeSource:
 
     def read(self):
         with self._lock:
-            if self.count >= self.frames:
+            if self.frames is not None and self.count >= self.frames:
                 return False, None
             self.count += 1
             return True, FakeFrame(self.count)
@@ -212,8 +212,13 @@ class ObserverTests(unittest.TestCase):
         store = CalibrationStore(Path(temp.name) / "cal")
         store.set_profile(calibration_id="cal", camera_epoch=service.camera_epoch)
         if verified:
-            for position in ("left", "center", "right", "top", "middle", "bottom"):
-                store.add_sample(position, "seed", 0.5, 0.5)
+            seed = {"left": (0.2, 0.5), "center": (0.5, 0.5), "right": (0.8, 0.5),
+                    "top": (0.5, 0.2), "middle": (0.5, 0.5), "bottom": (0.5, 0.8)}
+            for position, (x, y) in seed.items():
+                store.add_geometry_sample(position, "seed", x, y)
+            for position in seed:
+                store.record_outcome(position, "seed", [0.1, 0.1, 0.2, 0.2],
+                                     {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}, True, "seed")
             store.verify()
         observer = Observer(service, bridge, trace, control=control, legacy=True, calibration=store)
         return observer, bridge
@@ -281,14 +286,23 @@ class ObserverTests(unittest.TestCase):
                                      "args": {"calibration_id": "x", "verified": True}})
         self.assertFalse(described["verified"])
 
-    def test_calibration_verify_requires_samples(self):
+    def test_calibration_verify_requires_sdk_outcomes(self):
         observer, _ = self.make(verified=False)
         with self.assertRaises(ValueError):
             observer.handle({"op": "calibration.verify"})
         snap = observer.handle({"op": "snapshot"})
-        for position in ("left", "center", "right", "top", "middle", "bottom"):
+        positions = {"left": (0.2, 0.5), "center": (0.5, 0.5), "right": (0.8, 0.5),
+                     "top": (0.5, 0.2), "middle": (0.5, 0.5), "bottom": (0.5, 0.8)}
+        for position, (x, y) in positions.items():
             observer.handle({"op": "calibration.sample", "args": {
-                "position": position, "observation_id": snap["observation_id"], "candidate_id": "p1"}})
+                "position": position, "observation_id": snap["observation_id"], "x": x, "y": y}})
+        with self.assertRaises(ValueError):
+            observer.handle({"op": "calibration.verify"})
+        for position in positions:
+            observer.handle({"op": "calibration.outcome", "args": {
+                "position": position, "observation_id": snap["observation_id"],
+                "uvc_bbox": [0.1, 0.1, 0.2, 0.2],
+                "sdk_roi": {"x1": 0.1, "y1": 0.1, "x2": 0.2, "y2": 0.2}, "selected": True}})
         self.assertTrue(observer.handle({"op": "calibration.verify"})["verified"])
 
     def test_ai_control_set_disabled_by_default(self):
@@ -354,4 +368,7 @@ class FakeBridge:
 
     def request(self, op, args=None, timeout=20):
         self.calls.append((op, args or {}))
+        if op == "device.status":
+            return {"ok": True, "result": {"ai_main_mode_raw": 2, "ai_sub_mode_raw": 0,
+                                           "record_operation_raw": 2}, "sdk_calls": []}
         return self.result

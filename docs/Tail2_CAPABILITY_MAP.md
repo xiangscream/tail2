@@ -36,7 +36,7 @@
 | 删除目标（旧） | `aiDelSelectedTargetR` | `[U]` |
 | 点选/最大/居中 | `aiSetSelectTargetByBox` / `aiSetSelectBiggestTarget` / `aiSetSelectCentralTarget`（tail air） | `[A]` rc=0（biggest/central） |
 | 跟踪开关（Tail2） | `aiSetAiTrackModeEnabledR(AiTrackModeType,bool)` | `[A]` rc=0，**未改变 `ai_main_mode`** |
-| 跟踪开关（legacy） | `aiSetEnabledR(bool)` | `[A]` rc=0，未改变 `ai_main_mode` |
+| 跟踪开关（legacy） | `aiSetEnabledR(bool)` | `[V]` **手动 Look 后必须 `aiSetEnabledR(true)` 恢复 AI**，否则蓝灯不跟随 |
 | 跟踪速度 | `aiSetTrackSpeedTypeR(AiTrackSpeedType)`（tail air） | `[U]` |
 | 选区跟踪 | `aiSetZoneTrackStateR` / `aiSetLimitedZoneTrack*`（tiny2/tail air） | `[U]` |
 | `DevTargetZoomType` | Ignored/Normal/FullBody/HalfBody/CloseUp/Customized/GropHeadless/GropLowerBody/Adaptive | — |
@@ -47,7 +47,8 @@
 **关键真机结论**：
 - `target.select(Box)` 被接受但 **`ai_main_mode` 保持 0**；`selection=Center/Largest` 会把 `ai_main_mode` 置 **2（Track）**。
 - **无 native tracking box 回读**：SDK 不返回设备实际跟踪框。
-- 主动跟随：**在设备端跟踪开关已开（手势蓝灯）时可行**（UVC 下 yaw 随人走动变化）；SDK 侧单独 `target.select`/`aiSetAiTrackModeEnabledR` 未必启动跟随。跟踪启动的主责可能在设备端状态，需在 M1 明确“设备跟踪是否开启”的读法。
+- 主动跟随：**`aiSetEnabledR(true)` → `Center`（进入 Track，mode=2）→ 目标移动时 yaw 跟随**（实测 yaw 随走动变化、目标 cx 有界 ⇒ identity）。手动 Look（`gimbalSpeedCtrlR`）前按文档需关 AI，**结束后必须 `aiSetEnabledR(true)` 恢复**；`ai_main_mode=2` 单独不代表正在跟随。`aiSetAiTrackModeEnabledR` 不改变 `ai_main_mode`。
+- 设备端跟踪（手势/App）与 SDK AI 开关共同决定跟随；设备易进入“蓝灯不跟随”，可用官方软件拖摇杆或断电恢复。
 - HOG 对侧脸/半身不稳；face 台架在正面时可靠（仅台架，不是产品级 detector）。
 
 ## 3. Framing 与 Zoom
@@ -158,11 +159,11 @@ PanMin/Max、PitchMin/Max(float)、PanReverse(bool)、PresetSpeed(float，tail a
 
 ## 13. 探针 op 覆盖（native/main.cpp）
 
-`hello / device.list / device.open / device.status / candidates.probe / target.select(box|center|largest|clicked) / target.clear / framing.set / track.set / track.mode(ai.track_mode) / ai.select_biggest / ai.select_central / look.stop / look.nudge / look.status / zoom.set|get|range / ai.auto_zoom / ai.control.get|set / capture.device / record.start|stop / position.list / position.recall / position.save(拒绝) / shutdown`
+`hello / device.list / device.open / device.status / candidates.probe / snapshot / candidates / track.enter / target.select(box 需 Track；center|largest|clicked) / target.clear / framing.set / track.set / track.mode(ai.track_mode) / ai.select_biggest / ai.select_central / look.stop / look.nudge / look.status / zoom.set|get|range / ai.auto_zoom / ai.control.get（0–23 allowlist，读） / ai.control.set（allowlist + 需 --allow-control-writes） / calibration.profile|sample(geometry)|validate|outcome|verify|get / capture.photo / capture.device / record.start|stop / position.list / position.recall / position.save(拒绝) / shutdown`
 
 ## 14. 真机验证汇总（M0 + M0.5）
 
-- Windows x64 构建 + **71/71 离线测试**（含 native）。
+- Windows x64 构建 + **76/76 离线测试**（含 native）。
 - UVC 单属主 + 固定只读预览页（候选/requested ROI/ai/云台三轴 updated）；agent 读图闭环；`host_uvc` photo = 请求后**新帧** artifact。
 - 云台速度/停止 `[V]`；`gimbalGetAttitudeInfoR` 间歇失败 → last-good/stale。
 - 显式变焦 `[V]`；景别/自动变焦 `[A]` 弱。

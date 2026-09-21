@@ -27,8 +27,8 @@ const ControlParam kControlParams[] = {
   {6,"pan_gain_adaptive",'b',0,1},{7,"pan_gain_value",'f',-1000,1000},
   {8,"pan_locked",'b',0,1},{9,"pitch_gain_adaptive",'b',0,1},{10,"pitch_gain_value",'f',-1000,1000},
   {11,"pitch_locked",'b',0,1},{12,"auto_zoom_customized",'i',0,100},{13,"auto_zoom_mode",'i',0,100},
-  {14,"offset_adaptive_x",'b',0,1},{15,"offset_x",'f',-1,1},
-  {16,"offset_adaptive_y",'b',0,1},{17,"offset_y",'f',-1,1},
+  {14,"offset_adaptive_x",'b',0,1},{15,"offset_x",'f',-100,100},
+  {16,"offset_adaptive_y",'b',0,1},{17,"offset_y",'f',-100,100},
   {18,"limit_auto_selection",'b',0,1},{19,"limit_pan_min",'f',-180,180},{20,"limit_pan_max",'f',-180,180},
   {21,"limit_pitch_min",'f',-90,90},{22,"limit_pitch_max",'f',-90,90},{23,"auto_zoom_speed",'i',1,10},
 };
@@ -274,6 +274,31 @@ public:
             else if(spec->kind=='i'){ checked_rc(call("aiSetControlParaR(int)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<int>(raw));})); }
             else { checked_rc(call("aiSetControlParaR(float)",[&]{return dev_->aiSetControlParaR(target,para,static_cast<float>(raw));})); }
             return {{"para",pt},{"name",std::string(spec->name)},{"kind",std::string(1,spec->kind)},{"value",raw}};
+        } else if(op=="ai.offset") {
+            compatibility();
+            if (a.if_contains("auto")) { bool en=boolean(a,"auto"); checked_rc(call("aiSetAutoOffset",[&]{return dev_->aiSetAutoOffset(en);})); return {{"auto",en}}; }
+            if (a.if_contains("x")) { float v=static_cast<float>(num(a,"x",-100,100)); checked_rc(call("aiSetHorizontalOffset",[&]{return dev_->aiSetHorizontalOffset(v);})); return {{"x",v}}; }
+            if (a.if_contains("y")) { float v=static_cast<float>(num(a,"y",-100,100)); checked_rc(call("aiSetVerticalOffset",[&]{return dev_->aiSetVerticalOffset(v);})); return {{"y",v}}; }
+            throw std::runtime_error("provide auto/x/y");
+        } else if(op=="ai.offset.get") {
+            compatibility();
+            j::object out;
+            float x=0; int rc1=call("aiGetHorizontalOffset",[&]{return dev_->aiGetHorizontalOffset(x);});
+            out["horiz_rc"]=rc1; if(rc1==0) out["horiz"]=x;
+            float y=0; int rc2=call("aiGetVerticalOffset",[&]{return dev_->aiGetVerticalOffset(y);});
+            out["vert_rc"]=rc2; if(rc2==0) out["vert"]=y;
+            bool ao=false; int rc3=call("aiGetAutoOffsetEnable",[&]{return dev_->aiGetAutoOffsetEnable(ao);});
+            out["auto_rc"]=rc3; if(rc3==0) out["auto"]=ao;
+            return out;
+        } else if(op=="camera.face_ae") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("cameraSetFaceAER",[&]{return dev_->cameraSetFaceAER(on?1:0);}));
+        } else if(op=="camera.exposure_mode") {
+            compatibility(); const int m=static_cast<int>(num(a,"mode",0,4));
+            checked_rc(call("cameraSetExposureModeR",[&]{return dev_->cameraSetExposureModeR(m);}));
+        } else if(op=="camera.ev_bias") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,18));
+            checked_rc(call("cameraSetPAEEvBiasR",[&]{return dev_->cameraSetPAEEvBiasR(v);}));
         } else if(op=="record.start" || op=="record.stop" || op=="capture.device") {
             auto stream=op=="capture.device" ? Device::DevMediaStreamIdCapture : Device::DevMediaStreamIdRecord;
             auto action=op=="record.stop" ? Device::DevMediaParamOperationStop : Device::DevMediaParamOperationStart;

@@ -134,7 +134,46 @@ class Observer:
             width=self.service.status().get("width"), height=self.service.status().get("height"))
         return profile.describe()
 
-    def calibration_sample(self, args: dict) -> dict:
+    def _read_ai_mode(self):
+        response = self._call("device.status")
+        if response.get("ok") and isinstance(response.get("result"), dict):
+            self._record_ai(response["result"])
+            return response["result"].get("ai_main_mode_raw")
+        return None
+
+    def _enter_track(self, selection: str = "center", attempts: int = 20) -> dict:
+        snapshot = self.service.snapshot(write=False)
+        response = self._call("target.select", {"class": "human", "selection": selection,
+                                                "observation_id": snapshot["observation_id"]})
+        if not response.get("ok"):
+            raise RuntimeError(response.get("error", "track enter rejected"))
+        mode = None
+        for _ in range(attempts):
+            mode = self._read_ai_mode()
+            if mode == 2:
+                break
+            time.sleep(0.3)
+        return {"selection": selection, "ai_main_mode": mode, "entered": mode == 2,
+                "reobserve_required": True}
+
+    def track_enter(self, args: dict) -> dict:
+        self._require_control()
+        selection = args.get("selection", "center")
+        if selection not in ("center", "largest"):
+            raise ValueError("track.enter selection must be center or largest")
+        return self._enter_track(selection)
+
+    def _observe_target(self, attempts: int = 10):
+        for _ in range(attempts):
+            snapshot = self.service.snapshot(write=False)
+            candidates = snapshot.get("candidates", [])
+            if candidates:
+                candidate = max(candidates, key=lambda c: (c["bbox"][2] - c["bbox"][0]) * (c["bbox"][3] - c["bbox"][1]))
+                return candidate, snapshot
+            time.sleep(0.5)
+        return None, None
+
+    def calibration_geometry(self, args: dict) -> dict:
         observation_id = args.get("observation_id")
         if not observation_id:
             raise ValueError("observation_id required; take a snapshot at the known position first")
@@ -149,7 +188,56 @@ class Observer:
             y = (candidate.bbox[1] + candidate.bbox[3]) / 2
         else:
             x, y = float(args["x"]), float(args["y"])
-        return self.calibration.add_sample(args["position"], observation_id, x, y)
+        return self.calibration.add_geometry_sample(args["position"], observation_id, x, y)
+
+    def calibration_validate(self, args: dict) -> dict:
+        self._require_control()
+        position = args["position"]
+        self._require_calibration_verified(require=False)
+        mode = self._read_ai_mode()
+        entered = None
+        if mode != 2:
+            entered = self._enter_track(args.get("enter", "center"))
+            mode = entered["ai_main_mode"]
+        if mode != 2:
+            raise RuntimeError("could not enter Track runtime (ai_main_mode != 2); place target and retry")
+        candidate, snapshot = self._observe_target()
+        if not candidate:
+            raise RuntimeError("no target observed after entering Track; reobserve and retry")
+        bbox = tuple(candidate["bbox"])
+        roi = self.calibration.profile().to_sdk(Box(*bbox), require_verified=False)
+        payload = {"class": candidate.get("class", "human"), "selection": "box",
+                   "observation_id": snapshot["observation_id"], **roi}
+        response = self._call("target.select", payload)
+        if not response.get("ok"):
+            raise RuntimeError(response.get("error", "box rejected"))
+        cx0 = (bbox[0] + bbox[2]) / 2
+        cy0 = (bbox[1] + bbox[3]) / 2
+        samples = []
+        end = self.clock() + float(args.get("settle_s", 3.0))
+        while self.clock() < end:
+            time.sleep(0.5)
+            follow, _ = self._observe_target(attempts=1)
+            samples.append({"cx": round((follow["bbox"][0] + follow["bbox"][2]) / 2, 3),
+                            "cy": round((follow["bbox"][1] + follow["bbox"][3]) / 2, 3)} if follow else None)
+        return {"position": position, "observation_id": snapshot["observation_id"], "uvc_bbox": list(bbox),
+                "sdk_roi": roi, "entered_track": entered, "ai_main_mode": mode,
+                "cx_before": round(cx0, 3), "cy_before": round(cy0, 3), "samples": samples,
+                "note": "record the SDK selection outcome via calibration.outcome after visual check"}
+
+    def calibration_outcome(self, args: dict) -> dict:
+        position = args["position"]
+        observation_id = args.get("observation_id")
+        uvc_bbox = args.get("uvc_bbox")
+        sdk_roi = args.get("sdk_roi")
+        if not observation_id or not uvc_bbox or not sdk_roi:
+            raise ValueError("observation_id, uvc_bbox and sdk_roi are required")
+        return self.calibration.record_outcome(position, observation_id, uvc_bbox, sdk_roi,
+                                               bool(args.get("selected")), args.get("note", ""))
+
+    def _require_calibration_verified(self, *, require: bool = True) -> None:
+        if require and not self.calibration.profile().verified:
+            raise ValueError("calibration is not verified")
 
     def target_select(self, args: dict) -> dict:
         self._require_control()
@@ -188,6 +276,11 @@ class Observer:
         elif selection == "clicked":
             payload["x"] = float(args["x"])
             payload["y"] = float(args["y"])
+        if selection == "box":
+            mode = self._read_ai_mode()
+            if mode != 2:
+                raise RuntimeError("device is not in Track runtime; call track.enter (center/largest), "
+                                   "wait for ai_main_mode=2, REOBSERVE, then Box on the new frame")
         response = self._call("target.select", payload)
         if not response.get("ok"):
             raise RuntimeError(response.get("error", "target.select rejected"))
@@ -282,11 +375,17 @@ class Observer:
         if op == "calibration.profile":
             return self.calibration_profile(args)
         if op == "calibration.sample":
-            return self.calibration_sample(args)
+            return self.calibration_geometry(args)
+        if op == "calibration.validate":
+            return self.calibration_validate(args)
+        if op == "calibration.outcome":
+            return self.calibration_outcome(args)
         if op == "calibration.verify":
             return self.calibration.verify().describe()
         if op == "calibration.get":
             return self.calibration.profile().describe()
+        if op == "track.enter":
+            return self.track_enter(args)
         if op == "status":
             return self.status()
         if op == "device.status":
@@ -341,6 +440,13 @@ class Observer:
             response = self._call(op, args)
             if not response.get("ok"):
                 raise RuntimeError(response.get("error", "ai.control.set rejected"))
+            return response.get("result", {})
+        if op in ("camera.face_ae", "camera.exposure_mode", "camera.ev_bias", "ai.offset", "ai.offset.get"):
+            self._require_control()
+            self._require_legacy()
+            response = self._call(op, args)
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", f"{op} rejected"))
             return response.get("result", {})
         raise ValueError("unsupported observer op")
 
