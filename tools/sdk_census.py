@@ -125,7 +125,9 @@ def _split_statements(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
     start = 0
     for number, raw in lines:
         code = _strip_comment(raw).strip()
-        if not code:
+        if not code or code.startswith("#"):
+            continue
+        if re.fullmatch(r"[A-Z_][A-Z0-9_]*\s*\([^;()]*\)", code):
             continue
         if not buffer:
             start = number
@@ -282,7 +284,7 @@ def _parse_class(lines: list[tuple[int, str]], index: int, doc: str,
             entries.append(parsed)
             pending_doc = ""
             continue
-        if code.startswith(("struct", "union")) or code.startswith("typedef struct"):
+        if code.startswith(("struct", "union")) or code.startswith(("typedef struct", "typedef union")):
             parsed, consumed = _parse_struct(lines, consumed, pending_doc, qualified)
             entries.append(parsed)
             pending_doc = ""
@@ -306,6 +308,84 @@ def _parse_class(lines: list[tuple[int, str]], index: int, doc: str,
             pending_doc = ""
         consumed += 1
     return entries, consumed
+
+
+# Declarations a human would call "public surface" but that the formal parser
+# might drop. Unmatched candidates are a hard failure unless allowlisted with a
+# reason: "the parser saw all files" is not the same as "the parser saw all
+# declarations".
+CANDIDATE_ALLOWLIST: dict[str, str] = {}
+
+FUNCTION_CANDIDATE_RE = re.compile(
+    r"^\s*(?:[A-Z_][A-Z0-9_]*\s+)?(?:virtual\s+)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?"
+    r"(?:int32_t|int64_t|int16_t|uint32_t|uint64_t|uint16_t|int8_t|uint8_t|void|bool|"
+    r"float|double|int|unsigned|char|size_t|ssize_t|std::\w+|(?:Device|Devices)::\w+|"
+    r"Ai\w+|Dev\w+|Rm\w+)"
+    r"(?:\s*[*&])?\s+(\w+)\s*\(",
+    re.MULTILINE)
+ENUM_CANDIDATE_RE = re.compile(r"^\s*enum(?:\s+class)?\s+(\w+)", re.MULTILINE)
+STRUCT_CANDIDATE_RE = re.compile(r"^\s*(?:typedef\s+)?(?:struct|union)\s+(\w+)\s*[{:]",
+                                 re.MULTILINE)
+TYPEDEF_OPEN_RE = re.compile(r"^\s*typedef\s+(?:struct|union)\s*\{", re.MULTILINE)
+CALLBACK_CANDIDATE_RE = re.compile(r"typedef\s+std::function<[^;]*?>\s*(\w+)\s*;", re.DOTALL)
+
+
+def _typedef_aliases(text: str) -> set[str]:
+    """Alias names of anonymous ``typedef struct/union { ... } Name;`` blocks.
+
+    Brace-aware so nested anonymous members are not mistaken for the alias."""
+    aliases: set[str] = set()
+    for match in TYPEDEF_OPEN_RE.finditer(text):
+        depth = 0
+        index = match.end() - 1
+        while index < len(text):
+            char = text[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    tail = re.match(r"\s*(\w+)\s*;", text[index + 1:])
+                    if tail:
+                        aliases.add(tail.group(1))
+                    break
+            index += 1
+    return aliases
+
+
+def candidate_declarations(text: str) -> dict[str, set[str]]:
+    """Lightweight second pass: what looks like a declaration of each kind.
+
+    Preprocessor lines are removed first so `#define dlog(...)` is not mistaken
+    for a public method."""
+    body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    return {
+        "function": set(FUNCTION_CANDIDATE_RE.findall(body)),
+        "enum": set(ENUM_CANDIDATE_RE.findall(text)),
+        "struct": set(STRUCT_CANDIDATE_RE.findall(text)) | _typedef_aliases(text),
+        "callback": set(CALLBACK_CANDIDATE_RE.findall(text)),
+    }
+
+
+def completeness_report(text: str, parsed_names: set[str]) -> dict:
+    candidates = candidate_declarations(text)
+    candidate_total = sum(len(v) for v in candidates.values())
+    matched = 0
+    unmatched: list[dict] = []
+    allowlisted: list[dict] = []
+    for kind, names in candidates.items():
+        for name in sorted(names):
+            if name in parsed_names:
+                matched += 1
+            elif name in CANDIDATE_ALLOWLIST:
+                allowlisted.append({"kind": kind, "name": name, "reason": CANDIDATE_ALLOWLIST[name]})
+            else:
+                unmatched.append({"kind": kind, "name": name})
+    return {"candidate_declarations": candidate_total,
+            "parsed_declarations": matched,
+            "unmatched_candidates": unmatched,
+            "allowlisted": allowlisted,
+            "complete": not unmatched}
 
 
 def _classify(relative: PurePosixPath) -> str:
@@ -359,30 +439,51 @@ def _parse_unit(lines: list[tuple[int, str]], relative: str) -> list[dict]:
     entries: list[dict] = []
     index = 0
     doc = ""
+    pending: list[tuple[int, str]] = []
     while index < len(lines):
-        _, raw = lines[index]
+        number, raw = lines[index]
         comment = _comment_text(raw)
         if comment is not None:
             doc = (doc + " " + comment).strip()
             index += 1
             continue
         code = _strip_comment(raw).strip()
+        if not code or code.startswith("#"):
+            index += 1
+            continue
         if code.startswith("enum"):
             parsed, index = _parse_enum(lines, index, doc, None)
             entries.append(parsed)
             doc = ""
+            pending = []
             continue
-        if code.startswith(("struct", "union")) or code.startswith("typedef struct"):
+        if code.startswith(("struct", "union", "typedef struct", "typedef union")):
             parsed, index = _parse_struct(lines, index, doc, None)
             entries.append(parsed)
             doc = ""
+            pending = []
             continue
         if code.startswith("class ") and ";" not in code:
             parsed, index = _parse_class(lines, index, doc, None)
             entries.extend(parsed)
             doc = ""
+            pending = []
             continue
+        pending.append((number, raw))
+        if code.endswith(";") or code.endswith("}"):
+            for line_number, statement in _split_statements(pending):
+                parsed = (_parse_typedef_function(statement, doc, None, line_number)
+                          or _parse_method(statement, doc, None, line_number))
+                if parsed:
+                    entries.append(parsed)
+            pending = []
+            doc = ""
         index += 1
+    for line_number, statement in _split_statements(pending):
+        parsed = (_parse_typedef_function(statement, doc, None, line_number)
+                  or _parse_method(statement, doc, None, line_number))
+        if parsed:
+            entries.append(parsed)
     for entry in entries:
         entry["file"] = relative
         entry.setdefault("family", "other")
@@ -413,6 +514,8 @@ def census(root: Path) -> dict:
             symbols.extend(parsed)
             record["parsed"] = True
             record["symbols"] = len(parsed)
+            record["completeness"] = completeness_report("\n".join(text),
+                                                         {item["name"] for item in parsed})
         else:
             record["parsed"] = False
             record["skip_reason"] = "sample source: symbol references extracted, body not parsed"
@@ -431,7 +534,11 @@ def census(root: Path) -> dict:
     by_type: dict[str, int] = {}
     for entry in inventory:
         by_type[entry["type"]] = by_type.get(entry["type"], 0) + 1
+    completeness = {path: record["completeness"]
+                    for path, record in files.items() if "completeness" in record}
     return {"package_label": root.name, "files": files, "inventory": inventory,
+            "completeness": completeness,
+            "complete": all(item["complete"] for item in completeness.values()),
             "totals": {"symbols": len(symbols), "families": families, "kinds": kinds,
                        "by_type": by_type},
             "symbols": symbols}
@@ -448,6 +555,27 @@ def summarize(data: dict) -> str:
     for family, count in sorted(data["totals"]["families"].items()):
         lines.append(f"- {family}: {count}")
     return "\n".join(lines) + "\n"
+
+
+def _completeness_section(data: dict) -> list[str]:
+    if not data.get("completeness"):
+        return []
+    lines = ["", "## Parser completeness (candidate vs parsed)", "",
+             "A lightweight candidate pass independently finds declaration-shaped",
+             "lines; every candidate must be accounted for as parsed or allowlisted.",
+             "",
+             "| header | candidates | parsed | unmatched | allowlisted |",
+             "|---|---|---|---|---|"]
+    for path, item in sorted(data["completeness"].items()):
+        lines.append(f"| `{path}` | {item['candidate_declarations']} | "
+                     f"{item['parsed_declarations']} | {len(item['unmatched_candidates'])} | "
+                     f"{len(item['allowlisted'])} |")
+    for path, item in sorted(data["completeness"].items()):
+        for miss in item["unmatched_candidates"]:
+            lines.append(f"\n- UNMATCHED `{path}` {miss['kind']} `{miss['name']}`")
+    lines.append("")
+    lines.append(f"- overall complete: **{data.get('complete')}**")
+    return lines
 
 
 def _inventory_section(data: dict) -> list[str]:
@@ -506,6 +634,7 @@ def sanitized_markdown(data: dict) -> str:
         "(`tail2`, `tailair`, `tiny`, `meet`, ...); `generic` means the doc does not say.",
         "Presence in the header is **not** evidence that Tail2 firmware accepts or honors it.",
     ]
+    lines += _completeness_section(data)
     lines += _inventory_section(data)
     lines += ["", "## Totals by kind", "", "| kind | count |", "|---|---|"]
     for kind, count in sorted(data["totals"]["kinds"].items()):
@@ -554,6 +683,15 @@ def main() -> int:
         print(args.sanitize)
     print(json.dumps(data["totals"]["by_type"], ensure_ascii=False))
     print(json.dumps(data["totals"]["kinds"], ensure_ascii=False))
+    for path, item in sorted(data.get("completeness", {}).items()):
+        print(f"completeness {path}: candidates={item['candidate_declarations']} "
+              f"parsed={item['parsed_declarations']} unmatched={len(item['unmatched_candidates'])} "
+              f"allowlisted={len(item['allowlisted'])}")
+        for miss in item["unmatched_candidates"]:
+            print(f"  UNMATCHED {miss['kind']} {miss['name']}")
+    if not data.get("complete"):
+        print("CENSUS INCOMPLETE: unmatched candidate declarations")
+        return 1
     return 0
 
 

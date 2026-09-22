@@ -222,3 +222,87 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIn("Discovery inventory", markdown)
         self.assertIn("include/extra/nested.h", markdown)
         self.assertNotIn("Only for", markdown)
+
+
+BOUNDARY_HEADER = """\
+#pragma once
+
+DEV_EXPORT void dev_set_log_handler(int handler, void *param);
+
+PRINTFATTR(2, 3)
+void dlog(int level, const char *format, ...);
+
+#pragma pack(1)
+int cameraSetPowerCtrlActionR(int action);
+#pragma pack()
+
+class Export Device {
+public:
+\t#pragma pack(1)
+\tint cameraSetPAEEvBiasR(int32_t ev_bias);
+\t#pragma pack()
+
+\ttypedef union {
+\t\tstruct { int a; } tail_air;
+\t\tstruct { int b; } tail2;
+\t} CameraStatus;
+};
+"""
+
+
+class ParserCompletenessTests(unittest.TestCase):
+    """Regressions for doc-comment / declaration-boundary misses."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / "include/dev").mkdir(parents=True)
+        (root / "include/util").mkdir(parents=True)
+        (root / "include/dev/dev.hpp").write_text(BOUNDARY_HEADER, encoding="utf-8")
+        (root / "include/dev/devs.hpp").write_text("class Devices {\n};\n", encoding="utf-8")
+        (root / "include/util/comm.hpp").write_text("#define X 1\n", encoding="utf-8")
+        self.data = sdk_census.census(root)
+        self.names = {entry["name"] for entry in self.data["symbols"]}
+
+    def test_pragma_lines_do_not_glue_to_declarations(self):
+        self.assertIn("cameraSetPowerCtrlActionR", self.names)
+        self.assertIn("cameraSetPAEEvBiasR", self.names)
+
+    def test_attribute_macro_prefix_is_stripped(self):
+        self.assertIn("dlog", self.names)
+
+    def test_export_macro_prefixed_function_is_parsed(self):
+        self.assertIn("dev_set_log_handler", self.names)
+
+    def test_typedef_union_inside_class_is_parsed(self):
+        self.assertIn("CameraStatus", self.names)
+
+    def test_all_headers_report_complete(self):
+        self.assertTrue(self.data["complete"])
+        for item in self.data["completeness"].values():
+            self.assertEqual(item["unmatched_candidates"], [])
+
+    def test_candidate_pass_ignores_define_macros(self):
+        candidates = sdk_census.candidate_declarations("#define dlog(x) x\nint real(int a);\n")
+        self.assertNotIn("dlog", candidates["function"])
+        self.assertIn("real", candidates["function"])
+
+    def test_typedef_aliases_are_not_nested_members(self):
+        aliases = sdk_census._typedef_aliases("typedef union {\n struct { int a; } tail_air;\n} CameraStatus;\n")
+        self.assertEqual(aliases, {"CameraStatus"})
+
+    def test_completeness_gate_flags_unmatched(self):
+        report = sdk_census.completeness_report("int foo(int a);\n", set())
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["unmatched_candidates"][0]["name"], "foo")
+
+    def test_completeness_gate_accepts_parsed(self):
+        self.assertTrue(sdk_census.completeness_report("int foo(int a);\n", {"foo"})["complete"])
+
+    def test_allowlist_marks_unmatched_as_allowed(self):
+        sdk_census.CANDIDATE_ALLOWLIST["foo"] = "synthetic allowlist entry"
+        self.addCleanup(sdk_census.CANDIDATE_ALLOWLIST.pop, "foo", None)
+        report = sdk_census.completeness_report("int foo(int a);\n", set())
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["allowlisted"][0]["reason"], "synthetic allowlist entry")
