@@ -157,3 +157,34 @@ Raw evidence → `.local/sdk-sweep/` (frames, raw return payloads, LED notes).
 Sanitized verdicts → `docs/Tail2_SDK_TRUTH_MAP.md` rows + per-wave handoff in
 `docs/handoff/inbox/`. Any row still `PENDING_WAVE_A` after the device run must
 carry an explicit reason (device refused / not fixable / unsafe / deferred).
+
+
+## Wave B results (executed 2026-09-21, Tail2 fw 7.2.9.41)
+
+Raw evidence: `.local/sdk-sweep/waveB-log.md`.
+
+| id | verdict | evidence |
+|---|---|---|
+| B0 locks (PanLocked/PitchLocked) | **VERIFIED** (2 reps each) | yaw_span 0.00 vs baseline ~20 (pan); pitch_span 0.00 vs ~12 (pitch) |
+| B0 speed mode / limit area | `evidence_insufficient` | settled-position predicate cannot see speed or limits |
+| B0 external perturbation under Track | invalid predicate | native-speed push absorbed by the AI (`push_delta ≈ 0`, 6 trials) |
+| B1 gesture config | **READBACK_VERIFIED** | 18 params writable + readback + restored |
+| B1 gesture ownership | `evidence_insufficient` | no physical gesture performed |
+| B2 autofocus / AFC / focus getter | **READBACK_VERIFIED** | write → readback → restore |
+| B2 white balance | **VERIFIED** | tungsten preset → strong visual blue cast |
+| B2 WDR | `READBACK_VERIFIED` (async) | readback lags several seconds |
+| B3 boot position trigger | **VERIFIED** | yaw 10 / pitch 5 → exactly 0/0 |
+| B3 PresetSpeed | **CONSTRAINED** | 0.5 accepted, 2.0 ignored |
+| B3 gimbal limits | **CONSTRAINED** | stored, not enforced on absolute look |
+| B4 DevStatusCallback | **VERIFIED** | ~2 s cadence after refresh |
+| B4 FastDevStatusCallback | **UNSUPPORTED_TAIL2** | never fired |
+| B4 cameraStatus / hotplug | `ACCEPTED_UNPROVEN` | callable / registered, payload + hotplug unverified |
+| LimitedZoneTrack getters | **UNSUPPORTED_TAIL2** | rc −1 |
+| LimitedZoneTrack setters | `evidence_insufficient` | rc 0, no readback, no effect |
+
+Safety note: object targets that leave the frame park the device in mode 2 / sub 20
+and hunt to the gimbal limits (yaw −135°; operator saw the yellow LED). Recovery:
+`target.clear` → `look.stop` → `aiSetGimbalMotorAngleR(0,0)` → `aiSetEnabledR(true)`.
+A watchdog is required before any object-tracking product behaviour.
+
+| `cameraSetPowerCtrlActionR(PowerOff)` | **VERIFIED** | device gone from PnP + SDK list (doc says tail air) |

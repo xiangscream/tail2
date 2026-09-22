@@ -39,6 +39,10 @@ const ControlParam *find_control(int para) {
 }
 static std::atomic<unsigned long long> status_count{0};
 static std::atomic<long long> status_received_ms{0};
+static std::atomic<unsigned long long> fast_status_count{0};
+static std::atomic<long long> fast_status_received_ms{0};
+static std::atomic<unsigned long long> dev_changed_count{0};
+static std::atomic<long long> dev_changed_ms{0};
 static long long now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
 }
@@ -73,6 +77,9 @@ class Probe {
                 throw std::runtime_error("USB discovery unavailable: /sys/bus/usb/devices is missing; refusing SDK initialization");
 #endif
             Devices::get().setEnableMdnsScan(false);
+            Devices::get().setDevChangedCallback([](std::string, bool, void *) {
+                dev_changed_ms=now_ms(); ++dev_changed_count;
+            }, nullptr);
             initialized_=true;
         }
     }
@@ -133,6 +140,9 @@ public:
                 status_received_ms=now_ms(); ++status_count;
                 // Tail2 CameraStatus union layout not assumed.
             },nullptr);
+            dev_->setFastDevStatusCallbackFunc([](void*,const void*,const std::string &) {
+                fast_status_received_ms=now_ms(); ++fast_status_count;
+            },nullptr);
             dev_->enableDevStatusCallback(true);
             return {{"selected",true},{"firmware",dev_->devVersion()},{"transport","uvc"}};
         }
@@ -191,6 +201,82 @@ public:
             j::object out{{"rc",rc},{"completion","unverified"}};
             if(rc==0){ out["id"]=info.id; out["roll"]=info.roll; out["pitch"]=info.pitch;
                        out["yaw"]=info.yaw; out["zoom"]=info.zoom; }
+            return out;
+        }
+        if (op=="gesture.get") {
+            compatibility(); const int t=static_cast<int>(num(a,"type",0,8));
+            const auto type=static_cast<Device::DevGestureParaType>(t);
+            bool b=false; const int rcb=call("aiGetGestureParaR(bool)",[&]{return dev_->aiGetGestureParaR(type,b);});
+            float f=-12345.f; const int rcf=call("aiGetGestureParaR(float)",[&]{return dev_->aiGetGestureParaR(type,f);});
+            j::object out{{"type",t},{"bool_rc",rcb},{"float_rc",rcf},
+                          {"note","read both overloads; the bool overload accepts every type"}};
+            if(rcb==0) out["bool_value"]=b;
+            if(rcf==0) out["float_value"]=f;
+            return out;
+        }
+        if (op=="gesture.track.get") {
+            compatibility(); const int t=static_cast<int>(num(a,"type",0,8));
+            const auto type=static_cast<Device::DevGestureTrackParaType>(t);
+            bool b=false; const int rcb=call("aiGetGestureTrackParaR(bool)",[&]{return dev_->aiGetGestureTrackParaR(type,b);});
+            float f=-12345.f; const int rcf=call("aiGetGestureTrackParaR(float)",[&]{return dev_->aiGetGestureTrackParaR(type,f);});
+            int i=-12345; const int rci=call("aiGetGestureTrackParaR(int)",[&]{return dev_->aiGetGestureTrackParaR(type,i);});
+            j::object out{{"type",t},{"bool_rc",rcb},{"float_rc",rcf},{"int_rc",rci}};
+            if(rcb==0) out["bool_value"]=b;
+            if(rcf==0) out["float_value"]=f;
+            if(rci==0) out["int_value"]=i;
+            return out;
+        }
+        if (op=="zone.get") {
+            compatibility(); const std::string which=str(a,"which");
+            j::object out{{"which",which}};
+            if(which=="enabled"){ bool v=false; const int rc=call("aiGetLimitedZoneTrackEnabledR",[&]{return dev_->aiGetLimitedZoneTrackEnabledR(v);}); out["rc"]=rc; if(rc==0) out["value"]=v; return out; }
+            if(which=="autoselect"){ bool v=false; const int rc=call("aiGetLimitedZoneTrackAutoSelectR",[&]{return dev_->aiGetLimitedZoneTrackAutoSelectR(v);}); out["rc"]=rc; if(rc==0) out["value"]=v; return out; }
+            float v=0; int rc=-1;
+            if(which=="yaw_min") rc=call("aiGetLimitedZoneTrackYawMinR",[&]{return dev_->aiGetLimitedZoneTrackYawMinR(v,0);});
+            else if(which=="yaw_max") rc=call("aiGetLimitedZoneTrackYawMaxR",[&]{return dev_->aiGetLimitedZoneTrackYawMaxR(v,0);});
+            else if(which=="pitch_min") rc=call("aiGetLimitedZoneTrackPitchMinR",[&]{return dev_->aiGetLimitedZoneTrackPitchMinR(v,0);});
+            else if(which=="pitch_max") rc=call("aiGetLimitedZoneTrackPitchMaxR",[&]{return dev_->aiGetLimitedZoneTrackPitchMaxR(v,0);});
+            else throw std::runtime_error("which must be enabled|autoselect|yaw_min|yaw_max|pitch_min|pitch_max");
+            out["rc"]=rc; if(rc==0) out["value"]=v; return out;
+        }
+        if (op=="iq.autofocus.get") {
+            compatibility(); Device::DevAutoFocusType v=Device::DevAutoFocusAutoSelect;
+            checked_rc(call("cameraGetAutoFocusModeR",[&]{return dev_->cameraGetAutoFocusModeR(v);}));
+            return {{"autofocus",static_cast<int>(v)}};
+        }
+        if (op=="iq.afc.get") {
+            compatibility(); Device::DevAFCType v=Device::DevAFCCenter;
+            checked_rc(call("cameraGetAFCTrackModeR",[&]{return dev_->cameraGetAFCTrackModeR(v);}));
+            return {{"afc",static_cast<int>(v)}};
+        }
+        if (op=="iq.focus.get") {
+            compatibility(); int32_t focus=0; bool auto_focus=false;
+            const int rc=call("cameraGetFocusAbsolute",[&]{return dev_->cameraGetFocusAbsolute(focus,auto_focus);});
+            j::object out{{"rc",rc}};
+            if(rc==0){ out["focus"]=focus; out["auto_focus"]=auto_focus; }
+            return out;
+        }
+        if (op=="iq.wb.get") {
+            compatibility(); Device::DevWhiteBalanceType type=Device::DevWhiteBalanceAuto; int32_t param=0;
+            const int rc=call("cameraGetWhiteBalanceR(type)",[&]{return dev_->cameraGetWhiteBalanceR(type,param);});
+            j::object out{{"rc",rc}};
+            if(rc==0){ out["wb_type"]=static_cast<int>(type); out["param"]=param; }
+            return out;
+        }
+        if (op=="iq.wb.range") {
+            compatibility(); Device::UvcParamRange r;
+            checked_rc(call("cameraGetRangeWhiteBalanceR",[&]{return dev_->cameraGetRangeWhiteBalanceR(r);}));
+            return {{"min",r.min_},{"max",r.max_},{"step",r.step_},{"default",r.default_},{"valid",r.valid_}};
+        }
+        if (op=="iq.wdr.get") {
+            compatibility(); int32_t mode=0;
+            const int rc=call("cameraGetWdrR",[&]{return dev_->cameraGetWdrR(mode);});
+            j::object out{{"rc",rc}}; if(rc==0) out["wdr"]=mode; return out;
+        }
+        if (op=="status.callbacks.get") {
+            j::object out{{"status_count",status_count.load()},{"status_age_ms",status_received_ms.load()?now_ms()-status_received_ms.load():-1},
+                          {"fast_status_count",fast_status_count.load()},{"fast_status_age_ms",fast_status_received_ms.load()?now_ms()-fast_status_received_ms.load():-1},
+                          {"dev_changed_count",dev_changed_count.load()},{"dev_changed_age_ms",dev_changed_ms.load()?now_ms()-dev_changed_ms.load():-1}};
             return out;
         }
         writable();
@@ -407,6 +493,79 @@ public:
         } else if(op=="zoom.stop") {
             compatibility();
             checked_rc(call("cameraSetZoomStopR",[&]{return dev_->cameraSetZoomStopR();}));
+        } else if(op=="gesture.set") {
+            compatibility(); const int t=static_cast<int>(num(a,"type",0,8));
+            const auto type=static_cast<Device::DevGestureParaType>(t);
+            const std::string k=str(a,"kind"); const char kind=k.empty()?'b':k[0];
+            if(kind=='b'){ const double v=num(a,"value",0,1);
+                checked_rc(call("aiSetGestureParaR(bool)",[&]{return dev_->aiSetGestureParaR(type,v!=0.0);})); }
+            else { const double v=num(a,"value",-100000,100000);
+                checked_rc(call("aiSetGestureParaR(float)",[&]{return dev_->aiSetGestureParaR(type,static_cast<float>(v));})); }
+        } else if(op=="gesture.track.set") {
+            compatibility(); const int t=static_cast<int>(num(a,"type",0,8));
+            const auto type=static_cast<Device::DevGestureTrackParaType>(t);
+            const std::string k=str(a,"kind"); const char kind=k.empty()?'b':k[0];
+            if(kind=='b'){ const double v=num(a,"value",0,1);
+                checked_rc(call("aiSetGestureTrackParaR(bool)",[&]{return dev_->aiSetGestureTrackParaR(type,v!=0.0);})); }
+            else if(kind=='i'){ const double v=num(a,"value",-100000,100000);
+                checked_rc(call("aiSetGestureTrackParaR(int)",[&]{return dev_->aiSetGestureTrackParaR(type,static_cast<int>(v));})); }
+            else { const double v=num(a,"value",-100000,100000);
+                checked_rc(call("aiSetGestureTrackParaR(float)",[&]{return dev_->aiSetGestureTrackParaR(type,static_cast<float>(v));})); }
+        } else if(op=="gesture.ctrl.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetGestureCtrlR",[&]{return dev_->aiSetGestureCtrlR(on);}));
+        } else if(op=="zone.set") {
+            compatibility(); const std::string which=str(a,"which");
+            if(which=="yaw_min"){ const double v=num(a,"value",-180,180); checked_rc(call("aiSetLimitedZoneTrackYawMinR",[&]{return dev_->aiSetLimitedZoneTrackYawMinR(static_cast<float>(v));})); }
+            else if(which=="yaw_max"){ const double v=num(a,"value",-180,180); checked_rc(call("aiSetLimitedZoneTrackYawMaxR",[&]{return dev_->aiSetLimitedZoneTrackYawMaxR(static_cast<float>(v));})); }
+            else if(which=="pitch_min"){ const double v=num(a,"value",-90,90); checked_rc(call("aiSetLimitedZoneTrackPitchMinR",[&]{return dev_->aiSetLimitedZoneTrackPitchMinR(static_cast<float>(v));})); }
+            else if(which=="pitch_max"){ const double v=num(a,"value",-90,90); checked_rc(call("aiSetLimitedZoneTrackPitchMaxR",[&]{return dev_->aiSetLimitedZoneTrackPitchMaxR(static_cast<float>(v));})); }
+            else throw std::runtime_error("which must be yaw_min|yaw_max|pitch_min|pitch_max");
+        } else if(op=="zone.enabled.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetLimitedZoneTrackEnabledR",[&]{return dev_->aiSetLimitedZoneTrackEnabledR(on);}));
+        } else if(op=="zone.autoselect.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetLimitedZoneTrackAutoSelectR",[&]{return dev_->aiSetLimitedZoneTrackAutoSelectR(on);}));
+        } else if(op=="zone.state.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetZoneTrackStateR",[&]{return dev_->aiSetZoneTrackStateR(on);}));
+        } else if(op=="zone.gimbal.set") {
+            compatibility(); const bool on=boolean(a,"enabled");
+            checked_rc(call("aiSetZoneTrackGimbalEnabledR",[&]{return dev_->aiSetZoneTrackGimbalEnabledR(on);}));
+        } else if(op=="zone.initpos.trg") {
+            compatibility();
+            checked_rc(call("aiTrgLimitedZoneTrackInitPosR",[&]{return dev_->aiTrgLimitedZoneTrackInitPosR();}));
+        } else if(op=="trackingmode.set") {
+            compatibility(); const int m=static_cast<int>(num(a,"mode",0,10));
+            checked_rc(call("aiSetTrackingModeR",[&]{return dev_->aiSetTrackingModeR(static_cast<Device::AiVerticalTrackType>(m));}));
+        } else if(op=="iq.autofocus.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,3));
+            checked_rc(call("cameraSetAutoFocusModeR",[&]{return dev_->cameraSetAutoFocusModeR(static_cast<Device::DevAutoFocusType>(v));}));
+        } else if(op=="iq.afc.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,3));
+            checked_rc(call("cameraSetAFCTrackModeR",[&]{return dev_->cameraSetAFCTrackModeR(static_cast<Device::DevAFCType>(v));}));
+        } else if(op=="iq.wb.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,255)); const int param=static_cast<int>(num(a,"param",-100000,100000));
+            checked_rc(call("cameraSetWhiteBalanceR",[&]{return dev_->cameraSetWhiteBalanceR(static_cast<Device::DevWhiteBalanceType>(v),param);}));
+        } else if(op=="iq.wdr.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,4));
+            checked_rc(call("cameraSetWdrR",[&]{return dev_->cameraSetWdrR(v);}));
+        } else if(op=="power.ctrl") {
+            compatibility(); const int act=static_cast<int>(num(a,"action",0,4));
+            checked_rc(call("cameraSetPowerCtrlActionR",[&]{return dev_->cameraSetPowerCtrlActionR(
+                static_cast<Device::DevPowerCtrlActionType>(act));}));
+        } else if(op=="status.refresh") {
+            compatibility(); const bool fast=boolean(a,"fast");
+            const int v=static_cast<int>(num(a,"value",0,100000));
+            if(fast) call("fastNextRefreshDevStatus",[&]{dev_->fastNextRefreshDevStatus(v); return 0;});
+            else call("nextRefreshDevStatus",[&]{dev_->nextRefreshDevStatus(v); return 0;});
+        } else if(op=="status.camera.read") {
+            compatibility();
+            Device::CameraStatus st=dev_->cameraStatus();
+            const unsigned char *raw=reinterpret_cast<const unsigned char*>(&st);
+            j::array head; for(size_t i=0;i<8;++i) head.emplace_back(static_cast<int>(raw[i]));
+            return {{"callable",true},{"head_bytes",head},{"parsing","not attempted: Tail2 union layout undocumented"}};
         } else throw std::runtime_error("unsupported operation");
         return {{"dispatch","accepted"},{"completion","unverified"},{"artifact",nullptr}};
     }

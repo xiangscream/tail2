@@ -1,13 +1,15 @@
-# Tail2 SDK Truth Map (v2 — Wave A measured)
+# Tail2 SDK Truth Map (v3 — Wave A + Wave B measured)
 
-2026-09-21 · branch `feature/sdk-sweep-a` · baselines:
+2026-09-21 · branches `feature/sdk-sweep-a`, `feature/sdk-sweep-b` · baselines:
 
-- repo: `main @ 385fe55005c9e3b075fb454f18ffb9a789e9aab4`
+- repo: `main @ 385fe55005c9e3b075fb454f18ffb9a789e9aab4` (Wave A, merged) · `main @ 84607df1a7fb6412e710a103244bb859d0843b7e` (Wave B)
 - SDK package: `libdev_v2.1.0_8`
 - `include/dev/dev.hpp` SHA256: `d6f12cd9ab50c696b5a2cf9224dda3fc72245e17408bf52dd98d631cb7f74f2d`
-- machine census: `docs/Tail2_SDK_CENSUS.md` (480 symbols, `tools/sdk_census.py`)
+- machine census: `docs/Tail2_SDK_CENSUS.md` (**490 symbols**, `tools/sdk_census.py`) with a
+  provable **candidate-vs-parsed completeness gate**: dev.hpp 427/427, devs.hpp 27/27,
+  comm.hpp 4/4, unmatched 0. Declarations are no longer trusted by symbol count alone.
 - device: Tail2, firmware 7.2.9.41, UVC, Windows x64 build, operator present, OBSBOT Center closed
-- raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/*.png` (local only)
+- raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/waveB-log.md` (local only)
 
 ## 0. Status vocabulary
 
@@ -171,13 +173,68 @@ set is the seed of the later mid-layer **Outcome Verifier**.
 | `DEFERRED_UNSAFE` | `aiRstGimbalBootPosR`, `gimbalRstPosR`, `aiSetGimbalBootPosR`, format/delete/erase/upgrade/download/restore families | destructive or persistent writes |
 | `NOT_PRODUCT_RELEVANT` | TWS/earbuds, HDMI/SDI output, network config, remote-custom keys, zone presets | not part of the Agent Camera MVP |
 
-## 5. Open items handed to Wave B
+
+## 5. Wave B measured results (behavioral + gesture/IQ/preset/status)
+
+Statuses use the same expected-effect standard. `evidence_insufficient` rows are
+listed explicitly rather than being guessed as no-ops.
+
+| symbol / item | current_truth | evidence | notes |
+|---|---|---|---|
+| `aiSetControlParaR` PanLocked (8) | **VERIFIED** | gimbal time-series, 2 reps | yaw_span 0.00 vs baseline 21.63/19.09; pitch still moves |
+| `aiSetControlParaR` PitchLocked (11) | **VERIFIED** | gimbal time-series, 2 reps | pitch_span 0.00 vs baseline 11.24/12.39; yaw still moves |
+| `aiSetControlParaR` GimCtrlSpeedMode (5) | `evidence_insufficient` | settled position only | no settled difference; needs a transient predicate |
+| `aiSetControlParaR` TrackerType/Limits (3,19–22) | `evidence_insufficient` | settled position only | ±15 limits did not visibly clamp a one-shot reframe |
+| Motion / ForeTrack / Composition / Gains / AutoZoom* | `evidence_insufficient` | — | need a reliable motion source + frame-bound metrics |
+| box select in Normal mode | **READBACK_VERIFIED** | attitude | one-shot reframe; it does **not** enter Track (`ai_main_mode` stays 0) |
+| object target leaving frame | **CONSTRAINED / hazard** | attitude + LED | device parks in mode 2 / sub 20 and hunts to limits (yaw −135°); needs a watchdog |
+| `aiGet/SetGestureParaR` (9 params) | **READBACK_VERIFIED** | read/write/restore | defaults: Gesture/TargetSelection/Zoom/Record/Snapshot/Rolling = true; DynamicZoom/Mirror = false; ZoomFactor 1.0 |
+| `aiGet/SetGestureTrackParaR` (9 params) | **READBACK_VERIFIED** | read/write/restore | Pan ±45 / Pitch ±30 / HandType 0 / TrackSpeed 5 / Pan+Pitch enabled / Rest 3s |
+| gesture ownership vs Agent | `evidence_insufficient` | — | no physical gesture performed; gestures are enabled by default ⇒ live competing intent source |
+| `cameraGet/SetAutoFocusModeR` | **READBACK_VERIFIED** | read/write/restore | 1 = AFC |
+| `cameraGet/SetAFCTrackModeR` | **READBACK_VERIFIED** | read/write/restore | 3 = Foreground |
+| `cameraGetFocusAbsolute` | **READBACK_VERIFIED** | readback | focus 0, auto_focus true |
+| `cameraGet/SetWhiteBalanceR` | **VERIFIED** | read/write + **visual** | tungsten preset produced a strong blue cast |
+| `cameraGet/SetWdrR` | `READBACK_VERIFIED` (async) | readback | readback lags several seconds after a revert |
+| `aiGetGimbalBootPosR` | **READBACK_VERIFIED** | readback | id 0, pose 0/0/0, zoom 1.0 |
+| `aiTrgGimbalBootPosR` | **VERIFIED** | readback | from yaw 10 / pitch 5 → exactly 0/0 |
+| `aiSetGimbalParaR` PanReverse (4) | **READBACK_VERIFIED** | read/write/restore | distinct from `aiSetGimbalYawDirReverseR` (which had no effect) |
+| `aiSetGimbalParaR` PresetSpeed (5) | **CONSTRAINED** | readback | 0.5 accepted, 2.0 silently ignored (readback stays 1.0) |
+| gimbal para limits (0–3) | **CONSTRAINED** | readback + physical | stored and read back, but do **not** clamp `aiSetGimbalMotorAngleR` |
+| `DevStatusCallback` | **VERIFIED** | event count/age | ~2 s cadence; 10 events after `nextRefreshDevStatus` |
+| `FastDevStatusCallback` | **UNSUPPORTED_TAIL2** | event count | 0 events in 50 s+ including fast refresh |
+| `cameraStatus()` | `ACCEPTED_UNPROVEN` | callable | returns the union; **layout not parsed** (no documented Tail2 payload) |
+| `Devices::setDevChangedCallback` | `ACCEPTED_UNPROVEN` | registration | registered; hotplug not exercised |
+| `aiGetLimitedZoneTrack*R` (6 getters) | **UNSUPPORTED_TAIL2** | rc | all rc = −1 |
+| `aiSetLimitedZoneTrack*R` | `evidence_insufficient` | rc | rc = 0 with no readback and no observed effect |
+| `cameraSetPowerCtrlActionR(DevPowerCtrlPowerOff)` | **VERIFIED** | physical | documented `tail air` but powers the Tail2 off: camera disappears from PnP and the SDK list. Reboot/Suspend untested. |
+## 6. Remaining evidence gaps / Wave C-D carry-over
+
+Accepted as **evidence_insufficient** for Wave B (reason recorded, not "unmeasured"):
+`Composition`, `ForeTrack`, `Gains`, `AutoZoom`, `GimCtrlSpeedMode` behaviour,
+`LimitArea` behaviour, hotplug callback reliability, gesture physical ownership.
 
 1. Behavioral effect of AI control 2/4/5/8/11/13/18–23 under a moving target (does
-   `Composition`, `PanLocked`, `GimCtrlMode=PRO` actually change tracking?).
+   `Composition`, `GimCtrlMode=PRO` actually change tracking?). `PanLocked`/`PitchLocked`
+   are already VERIFIED in §5.
 2. `aiSetGimbalParaR` writes (limits / PanReverse / PresetSpeed) with readback restore.
 3. `aiTrgGimbalBootPosR` (gimbal motion to the stored pose) and whether boot-position
    set/reset can be made safe with a saved pose.
 4. Whether `aiSetGimbalYawDirReverseR` needs a reboot, and whether it affects a
    layer other than the SDK paths tested.
 5. Gesture family, focus/WB, presets, status callbacks (Wave B scope).
+
+## 7. Runtime requirements registered by this sweep (not implemented here)
+
+- **Object-loss watchdog (hard requirement, from Wave B).** A Common-class target that
+  leaves the frame parks the device in `ai_main_mode=2 / ai_sub_mode=20` and keeps
+  searching until the gimbal reaches its limits (measured yaw −135°, pitch 55°; the
+  operator saw the yellow LED). The Runtime must have a target-loss timeout /
+  out-of-frame watchdog → `target.clear` → gimbal stop → recover to a known pose → state
+  and evidence update. Registered as a requirement only: the Truth Sweep does not build
+  primitives.
+- **Gesture as a competing intent source (from Wave B).** Gesture / TargetSelection /
+  Zoom / Record / Snapshot / Rolling are enabled by default, so gestures are a live
+  intent source running in parallel with the Agent. Runtime must arbitrate explicitly.
+- **B1b (deferred, pre-Primitive-Freeze):** a short real-human gesture session to measure
+  how a gesture acquires Track / Gimbal / Zoom ownership. Not a Wave C blocker.
