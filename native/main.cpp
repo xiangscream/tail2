@@ -301,6 +301,28 @@ public:
             const int rc=call("cameraGetRecordSplitSizeR",[&]{return dev_->cameraGetRecordSplitSizeR(v);});
             j::object out{{"rc",rc}}; if(rc==0) out["split"]=static_cast<int>(v); return out;
         }
+        if (op=="media.ndirtsp.get") {
+            compatibility(); j::object out;
+            Device::RtspOrNdiEnabled sel=Device::RtspDisabledAndNdiDisabled;
+            int rc=call("cameraGetSelectNdiOrRtspR",[&]{return dev_->cameraGetSelectNdiOrRtspR(sel);});
+            out["select_rc"]=rc; if(rc==0) out["select"]=static_cast<int>(sel);
+            Device::DevVideoBitLevelType bl=Device::DevVideoBitLevelDefault;
+            rc=call("cameraGetNdiRtspBitrateLevelR",[&]{return dev_->cameraGetNdiRtspBitrateLevelR(bl);});
+            out["bitrate_rc"]=rc; if(rc==0) out["bitrate_level"]=static_cast<int>(bl);
+            Device::DevVideoEncoderFormat fmt=Device::DevVideoEncoderAuto;
+            rc=call("cameraGetNdiRtspEncoderFormatR",[&]{return dev_->cameraGetNdiRtspEncoderFormatR(fmt);});
+            out["format_rc"]=rc; if(rc==0) out["encoder_format"]=static_cast<int>(fmt);
+            return out;
+        }
+        if (op=="media.hdmi.get") {
+            compatibility(); Device::HdmiInfo info{};
+            const int rc=call("cameraGetHdmiInfoR",[&]{return dev_->cameraGetHdmiInfoR(info);});
+            j::object out{{"rc",rc}};
+            if(rc==0){ out["osd_language"]=static_cast<int>(info.osd_language);
+                       out["content"]=static_cast<int>(info.content); out["volume"]=info.volume;
+                       out["resolution"]=static_cast<int>(info.resolution); out["info_display"]=info.info_display; }
+            return out;
+        }
         if (op=="status.callbacks.get") {
             j::object out{{"status_count",status_count.load()},{"status_age_ms",status_received_ms.load()?now_ms()-status_received_ms.load():-1},
                           {"fast_status_count",fast_status_count.load()},{"fast_status_age_ms",fast_status_received_ms.load()?now_ms()-fast_status_received_ms.load():-1},
@@ -585,7 +607,7 @@ public:
             Device::DevMediaEncodeParam p{};
             p.width=static_cast<int>(num(a,"width",-1,100000));
             p.height=static_cast<int>(num(a,"height",-1,100000));
-            p.fps=static_cast<int>(num(a,"fps",-1,1000));
+            p.fps=static_cast<int>(num(a,"fps",-1,1000000));
             p.bitrate=static_cast<int>(num(a,"bitrate",-1,1000000000));
             p.encode_format=static_cast<Device::DevVideoEncoderFormat>(
                 static_cast<int>(num(a,"encode_format",0,5)));
@@ -596,6 +618,26 @@ public:
             compatibility(); const int v=static_cast<int>(num(a,"value",0,6));
             checked_rc(call("cameraSetRecordSplitSizeR",[&]{return dev_->cameraSetRecordSplitSizeR(
                 static_cast<Device::DevVideoSplitSizeType>(v));}));
+        } else if(op=="media.ndirtsp.set") {
+            compatibility(); const std::string field=str(a,"field");
+            if(field=="select"){ const int v=static_cast<int>(num(a,"value",0,2));
+                checked_rc(call("cameraSetSelectNdiOrRtspR",[&]{return dev_->cameraSetSelectNdiOrRtspR(static_cast<Device::RtspOrNdiEnabled>(v));})); }
+            else if(field=="bitrate"){ const int v=static_cast<int>(num(a,"value",0,3));
+                checked_rc(call("cameraSetNdiRtspBitrateLevelR",[&]{return dev_->cameraSetNdiRtspBitrateLevelR(static_cast<Device::DevVideoBitLevelType>(v));})); }
+            else if(field=="format"){ const int v=static_cast<int>(num(a,"value",0,5));
+                checked_rc(call("cameraSetNdiRtspEncoderFormatR",[&]{return dev_->cameraSetNdiRtspEncoderFormatR(static_cast<Device::DevVideoEncoderFormat>(v));})); }
+            else throw std::runtime_error("field must be select|bitrate|format");
+        } else if(op=="media.hdmi.set") {
+            compatibility(); const std::string field=str(a,"field");
+            Device::HdmiInfo info{}; const int grc=call("cameraGetHdmiInfoR",[&]{return dev_->cameraGetHdmiInfoR(info);});
+            if(grc!=0) throw std::runtime_error("read-before-write failed");
+            if(field=="osd_language") info.osd_language=static_cast<Device::HdmiOsdLanguage>(static_cast<int>(num(a,"value",0,8)));
+            else if(field=="content") info.content=static_cast<Device::HdmiOutputContent>(static_cast<int>(num(a,"value",0,1)));
+            else if(field=="volume") info.volume=static_cast<int>(num(a,"value",0,100));
+            else if(field=="resolution") info.resolution=static_cast<Device::DevVideoResType>(static_cast<int>(num(a,"value",0,255)));
+            else if(field=="info_display") info.info_display=static_cast<int>(num(a,"value",0,1));
+            else throw std::runtime_error("field must be osd_language|content|volume|resolution|info_display");
+            checked_rc(call("cameraSetHdmiInfoR",[&]{return dev_->cameraSetHdmiInfoR(info);}));
         } else if(op=="power.ctrl") {
             compatibility(); const int act=static_cast<int>(num(a,"action",0,4));
             checked_rc(call("cameraSetPowerCtrlActionR",[&]{return dev_->cameraSetPowerCtrlActionR(
