@@ -1,4 +1,4 @@
-# Tail2 SDK Truth Map (v3 — Wave A + Wave B measured)
+# Tail2 SDK Truth Map (v4 — Wave A + Wave B + Wave C measured)
 
 2026-09-21 · branches `feature/sdk-sweep-a`, `feature/sdk-sweep-b` · baselines:
 
@@ -10,6 +10,7 @@
   comm.hpp 4/4, unmatched 0. Declarations are no longer trusted by symbol count alone.
 - device: Tail2, firmware 7.2.9.41, UVC, Windows x64 build, operator present, OBSBOT Center closed
 - raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/waveB-log.md` (local only)
+- Wave C media surface + measured results: `docs/Tail2_SDK_MEDIA_SURFACE.md`
 
 ## 0. Status vocabulary
 
@@ -238,3 +239,23 @@ Accepted as **evidence_insufficient** for Wave B (reason recorded, not "unmeasur
   intent source running in parallel with the Agent. Runtime must arbitrate explicitly.
 - **B1b (deferred, pre-Primitive-Freeze):** a short real-human gesture session to measure
   how a gesture acquires Track / Gimbal / Zoom ownership. Not a Wave C blocker.
+
+## 8. Wave C measured results (Media / Output / UVC coexistence)
+
+| symbol / item | current_truth | evidence | notes |
+|---|---|---|---|
+| `cameraGet{Record,Output,Live}EncodeParamR` | **READBACK_VERIFIED** | typed readback | fps is milli-fps; `night_flag` changes the output readback |
+| `cameraSet{Record,Output}EncodeParamR` | **CONSTRAINED** | read/write/restore | bitrate validated per resolution (4K@20 ignored, 1080p@10 → 20); `encode_format` write not reflected |
+| `cameraGetLiveEncodeParamR` | **READBACK_VERIFIED** | typed readback | no public setter ⇒ live encode write `NO_PUBLIC_PATH` |
+| `cameraGet/SetRecordSplitSizeR` | **VERIFIED** | read/write/restore | 5 → 2 → 5 |
+| `cameraGetMediaOperateParamR` | **READBACK_VERIFIED** | per-stream readback | Uvc=Start; Record/Live/Rtsp/Ndi/Srt=Stop; Capture rc −1; Hdmi/Sdi/sub=Auto; Auto rc −1 |
+| `cameraSetMediaOperateParamR` (Record, Start) | `no_effect_observed` / `prerequisite_unmet` | readback | state stays Stop; storage prerequisite unmet ⇒ not `UNSUPPORTED` |
+| UVC coexistence | **CONSTRAINED** | frames + readback | no conflict observed while native ops were merely accepted; native-active case unreachable |
+| `cameraGetSelectNdiOrRtspR` / `NdiRtspEncoderFormatR` | **READBACK_VERIFIED** | readback | select 0, format 1 |
+| `cameraGetNdiRtspBitrateLevelR` | **contract anomaly** | readback | returned 60000000 for an enum-typed (`DevVideoBitLevelType`) out-param |
+| `cameraSetSelectNdiOrRtspR` / `NdiRtspBitrateLevelR` / `NdiRtspEncoderFormatR` / `HdmiInfoR` | `no_effect_observed` | read/write/restore | rc=0, readback unchanged (doc = tailair) |
+| `cameraGetHdmiInfoR` | **READBACK_VERIFIED** | readback | all fields 0 |
+| SDI / SRT configuration | **NO_PUBLIC_PATH** | static | enums only, no getter/setter functions |
+| device-native artifact retrieval | **NO_PUBLIC_PATH** | static | download family documented meet+tiny |
+| media state via callback | `evidence_insufficient` | event count | ordinary callback ~2 s; `CameraStatus` union layout undocumented ⇒ getter authoritative |
+| long media experiments | **CONSTRAINED (link risk)** | observation | USB enumeration failed / device dropped twice (once after PowerOff, once mid media read); recovered by physical re-plug |
