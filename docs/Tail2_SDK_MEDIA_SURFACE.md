@@ -109,3 +109,21 @@ that can be tied to an artifact/stream observation; record both.
 - Any new Primitive API or Runtime feature; the object-loss watchdog stays a
   registered requirement only.
 - Purchasing/attaching sinks (HDMI/SDI capture) for completeness.
+
+## 8. Measured results (Wave C, fw 7.2.9.41)
+
+| item | verdict | evidence |
+|---|---|---|
+| `cameraGet{Record,Output,Live}EncodeParamR` | **READBACK_VERIFIED** | record 4K/60Mbps/H264, live 1080p/4Mbps; **fps is milli-fps (30000 = 30.000)**; `night_flag` changes the output readback (4K/60 ↔ 1080p/20) |
+| `cameraSet{Record,Output}EncodeParamR` | **CONSTRAINED** | width/height/bitrate writable + readback, but **bitrate is validated per resolution**: 4K@20Mbps ignored (stays 60), 1080p@10Mbps raised to 20; `encode_format` write not reflected |
+| `cameraGetLiveEncodeParamR` | **READBACK_VERIFIED**, setter `NO_PUBLIC_PATH` | no public live encode setter |
+| `cameraGet/SetRecordSplitSizeR` | **VERIFIED** | 5→2→5 |
+| `cameraGetMediaOperateParamR` | **READBACK_VERIFIED** | Uvc=Start; Record/Live/Rtsp/Ndi/Srt=Stop; **Capture rc=−1**; Hdmi/Sdi/sub=Auto; Auto rc=−1 |
+| `cameraSetMediaOperateParamR(Record,Start)` | `no_effect_observed` / `prerequisite_unmet` | rc=0 but state stays Stop; no storage ⇒ cannot distinguish "needs SD" from silent no-op |
+| UVC coexistence | **CONSTRAINED** | UVC frames kept flowing (~29 fps) while native media commands were issued; second UVC open fails (single owner); "native active → UVC" unreachable without storage/network |
+| `cameraGetSelectNdiOrRtspR` / `NdiRtspEncoderFormatR` | **READBACK_VERIFIED** | select=0, format=1 |
+| `cameraGetNdiRtspBitrateLevelR` | **contract anomaly** | enum-typed getter returned **60000000** (raw bitrate in an enum) |
+| `cameraSetSelectNdiOrRtspR` / `NdiRtspBitrateLevelR` / `HdmiInfoR` | `no_effect_observed` | rc=0, readback unchanged (doc = tailair) |
+| SDI / SRT config | **NO_PUBLIC_PATH** | enums only, no functions |
+| device-native artifact retrieval | **NO_PUBLIC_PATH** | download family documented meet+tiny; not product-relevant for this MVP |
+| media state via callback | `evidence_insufficient` | ordinary callback fires ~2 s but the `CameraStatus` union has no documented Tail2 layout ⇒ getter is authoritative |

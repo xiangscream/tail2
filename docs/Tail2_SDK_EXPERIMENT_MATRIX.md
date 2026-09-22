@@ -188,3 +188,20 @@ and hunt to the gimbal limits (yaw −135°; operator saw the yellow LED). Recov
 A watchdog is required before any object-tracking product behaviour.
 
 | `cameraSetPowerCtrlActionR(PowerOff)` | **VERIFIED** | device gone from PnP + SDK list (doc says tail air) |
+
+## Wave C results (executed 2026-09-21, Tail2 fw 7.2.9.41)
+
+Raw evidence: `.local/sdk-sweep/waveC-log.md`.
+
+| id | verdict | evidence |
+|---|---|---|
+| C1 record/output/live encode readback | **READBACK_VERIFIED** | milli-fps; `night_flag` changes output |
+| C1 record/output encode write | **CONSTRAINED** | per-resolution bitrate validation; format write ignored |
+| C1 split size | **VERIFIED** | 5→2→5 |
+| C2 media operation readback | **READBACK_VERIFIED** | per stream (Uvc Start; Capture/Auto rc −1) |
+| C2 record start | `no_effect_observed` / `prerequisite_unmet` | state stays Stop; no storage |
+| C3 UVC open vs native op | **CONSTRAINED** | UVC frames unaffected; native never active |
+| C4 NDI/RTSP/HDMI readback | **READBACK_VERIFIED** | setters `no_effect_observed`; bitrate-level contract anomaly |
+| C4 SDI/SRT | **NO_PUBLIC_PATH** | enums only |
+| C4 receiver-level | `prerequisite_unmet` | no network target configured |
+| C5 media state via callback | `evidence_insufficient` | ordinary callback fires; union unparseable |
