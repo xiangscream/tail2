@@ -10,6 +10,7 @@
   comm.hpp 4/4, unmatched 0. Declarations are no longer trusted by symbol count alone.
 - device: Tail2, firmware 7.2.9.41, UVC, Windows x64 build, operator present, OBSBOT Center closed
 - raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/waveB-log.md` (local only)
+- Wave C media surface (C0): `docs/Tail2_SDK_MEDIA_SURFACE.md`
 
 ## 0. Status vocabulary
 
