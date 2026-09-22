@@ -1,13 +1,15 @@
-# Tail2 SDK Truth Map (v2 — Wave A measured)
+# Tail2 SDK Truth Map (v3 — Wave A + Wave B measured)
 
-2026-09-21 · branch `feature/sdk-sweep-a` · baselines:
+2026-09-21 · branches `feature/sdk-sweep-a`, `feature/sdk-sweep-b` · baselines:
 
-- repo: `main @ 385fe55005c9e3b075fb454f18ffb9a789e9aab4`
+- repo: `main @ 385fe55005c9e3b075fb454f18ffb9a789e9aab4` (Wave A, merged) · `main @ 84607df1a7fb6412e710a103244bb859d0843b7e` (Wave B)
 - SDK package: `libdev_v2.1.0_8`
 - `include/dev/dev.hpp` SHA256: `d6f12cd9ab50c696b5a2cf9224dda3fc72245e17408bf52dd98d631cb7f74f2d`
-- machine census: `docs/Tail2_SDK_CENSUS.md` (480 symbols, `tools/sdk_census.py`)
+- machine census: `docs/Tail2_SDK_CENSUS.md` (**490 symbols**, `tools/sdk_census.py`) with a
+  provable **candidate-vs-parsed completeness gate**: dev.hpp 427/427, devs.hpp 27/27,
+  comm.hpp 4/4, unmatched 0. Declarations are no longer trusted by symbol count alone.
 - device: Tail2, firmware 7.2.9.41, UVC, Windows x64 build, operator present, OBSBOT Center closed
-- raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/*.png` (local only)
+- raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/waveB-log.md` (local only)
 
 ## 0. Status vocabulary
 
@@ -172,7 +174,7 @@ set is the seed of the later mid-layer **Outcome Verifier**.
 | `NOT_PRODUCT_RELEVANT` | TWS/earbuds, HDMI/SDI output, network config, remote-custom keys, zone presets | not part of the Agent Camera MVP |
 
 
-## 6. Wave B measured results (behavioral + gesture/IQ/preset/status)
+## 5. Wave B measured results (behavioral + gesture/IQ/preset/status)
 
 Statuses use the same expected-effect standard. `evidence_insufficient` rows are
 listed explicitly rather than being guessed as no-ops.
@@ -206,14 +208,33 @@ listed explicitly rather than being guessed as no-ops.
 | `aiGetLimitedZoneTrack*R` (6 getters) | **UNSUPPORTED_TAIL2** | rc | all rc = −1 |
 | `aiSetLimitedZoneTrack*R` | `evidence_insufficient` | rc | rc = 0 with no readback and no observed effect |
 | `cameraSetPowerCtrlActionR(DevPowerCtrlPowerOff)` | **VERIFIED** | physical | documented `tail air` but powers the Tail2 off: camera disappears from PnP and the SDK list. Reboot/Suspend untested. |
+## 6. Remaining evidence gaps / Wave C-D carry-over
 
-## 5. Open items handed to Wave B
+Accepted as **evidence_insufficient** for Wave B (reason recorded, not "unmeasured"):
+`Composition`, `ForeTrack`, `Gains`, `AutoZoom`, `GimCtrlSpeedMode` behaviour,
+`LimitArea` behaviour, hotplug callback reliability, gesture physical ownership.
 
 1. Behavioral effect of AI control 2/4/5/8/11/13/18–23 under a moving target (does
-   `Composition`, `PanLocked`, `GimCtrlMode=PRO` actually change tracking?).
+   `Composition`, `GimCtrlMode=PRO` actually change tracking?). `PanLocked`/`PitchLocked`
+   are already VERIFIED in §5.
 2. `aiSetGimbalParaR` writes (limits / PanReverse / PresetSpeed) with readback restore.
 3. `aiTrgGimbalBootPosR` (gimbal motion to the stored pose) and whether boot-position
    set/reset can be made safe with a saved pose.
 4. Whether `aiSetGimbalYawDirReverseR` needs a reboot, and whether it affects a
    layer other than the SDK paths tested.
 5. Gesture family, focus/WB, presets, status callbacks (Wave B scope).
+
+## 7. Runtime requirements registered by this sweep (not implemented here)
+
+- **Object-loss watchdog (hard requirement, from Wave B).** A Common-class target that
+  leaves the frame parks the device in `ai_main_mode=2 / ai_sub_mode=20` and keeps
+  searching until the gimbal reaches its limits (measured yaw −135°, pitch 55°; the
+  operator saw the yellow LED). The Runtime must have a target-loss timeout /
+  out-of-frame watchdog → `target.clear` → gimbal stop → recover to a known pose → state
+  and evidence update. Registered as a requirement only: the Truth Sweep does not build
+  primitives.
+- **Gesture as a competing intent source (from Wave B).** Gesture / TargetSelection /
+  Zoom / Record / Snapshot / Rolling are enabled by default, so gestures are a live
+  intent source running in parallel with the Agent. Runtime must arbitrate explicitly.
+- **B1b (deferred, pre-Primitive-Freeze):** a short real-human gesture session to measure
+  how a gesture acquires Track / Gimbal / Zoom ownership. Not a Wave C blocker.

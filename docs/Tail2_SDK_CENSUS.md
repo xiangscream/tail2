@@ -6,11 +6,24 @@ classification, enum member counts and a file inventory only: no proprietary
 header bodies, sample bodies, docs prose or binaries.
 
 - package label: `libdev_v2.1.0_8`
-- symbols: 479
+- symbols: 490
 
 Applicability comes from the SDK's own doc comments where they name products
 (`tail2`, `tailair`, `tiny`, `meet`, ...); `generic` means the doc does not say.
 Presence in the header is **not** evidence that Tail2 firmware accepts or honors it.
+
+## Parser completeness (candidate vs parsed)
+
+A lightweight candidate pass independently finds declaration-shaped
+lines; every candidate must be accounted for as parsed or allowlisted.
+
+| header | candidates | parsed | unmatched | allowlisted |
+|---|---|---|---|---|
+| `include/dev/dev.hpp` | 427 | 427 | 0 | 0 |
+| `include/dev/devs.hpp` | 27 | 27 | 0 | 0 |
+| `include/util/comm.hpp` | 4 | 4 | 0 | 0 |
+
+- overall complete: **True**
 
 ## Discovery inventory (surface proof)
 
@@ -63,33 +76,33 @@ table is the evidence for what the public surface actually contains.
 
 | kind | count |
 |---|---|
-| callback | 14 |
+| callback | 16 |
 | class | 2 |
 | enum | 110 |
-| function | 291 |
-| struct | 61 |
-| union | 1 |
+| function | 302 |
+| struct | 58 |
+| union | 2 |
 
 ## Totals by family
 
 | family | count |
 |---|---|
-| ai | 18 |
+| ai | 17 |
 | audio | 24 |
 | camera | 26 |
-| device | 37 |
-| gesture | 21 |
+| device | 38 |
+| gesture | 23 |
 | gimbal | 32 |
-| iq | 80 |
-| media | 44 |
-| media.output | 25 |
-| network | 18 |
+| iq | 81 |
+| media | 45 |
+| media.output | 27 |
+| network | 19 |
 | other | 24 |
-| power | 4 |
+| power | 5 |
 | preset | 14 |
-| status | 30 |
+| status | 32 |
 | storage | 16 |
-| target | 30 |
+| target | 31 |
 | track | 34 |
 | upgrade | 2 |
 
@@ -114,7 +127,6 @@ table is the evidence for what the public surface actually contains.
 | `aiSetHorizontalOffset` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `aiSetVerticalOffset` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `setTailAirWhiteList` | function | read_only | generic |  | `include/dev/devs.hpp` |
-| `tail_air` | struct | data | generic | 37 fields | `include/dev/dev.hpp` |
 
 ## family: audio
 
@@ -194,6 +206,7 @@ table is the evidence for what the public surface actually contains.
 | `DevTXType` | enum | data | generic | 2 members | `include/dev/dev.hpp` |
 | `DevWakeUpState` | enum | data | generic | 3 members | `include/dev/devs.hpp` |
 | `DevicesState` | enum | data | generic | 21 members | `include/dev/devs.hpp` |
+| `Device` | function | unknown | generic |  | `include/dev/dev.hpp` |
 | `Devices` | function | unknown | generic |  | `include/dev/devs.hpp` |
 | `containDev` | function | unknown | generic |  | `include/dev/devs.hpp` |
 | `deleteDevBySn` | function | destructive | generic |  | `include/dev/devs.hpp` |
@@ -239,6 +252,8 @@ table is the evidence for what the public surface actually contains.
 | `aiSetGestureTrackParaR` | function | reversible_write | tail2 |  | `include/dev/dev.hpp` |
 | `aiSetGestureTrackParaR` | function | reversible_write | generic |  | `include/dev/dev.hpp` |
 | `aiSetGestureTrackParaR` | function | reversible_write | generic |  | `include/dev/dev.hpp` |
+| `dev_get_log_handler` | function | read_only | generic |  | `include/util/comm.hpp` |
+| `dev_set_log_handler` | function | reversible_write | generic |  | `include/util/comm.hpp` |
 | `AiHandTrackStateInfo` | struct | data | tiny | 6 fields | `include/dev/dev.hpp` |
 | `DevVirtualTrackGesture` | struct | data | generic | 3 fields | `include/dev/dev.hpp` |
 | `RemoteCustomKeyFun` | struct | data | generic | 2 fields | `include/dev/dev.hpp` |
@@ -356,6 +371,7 @@ table is the evidence for what the public surface actually contains.
 | `cameraSetMAEApertureR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetMAEIsoR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetMAEShutterR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
+| `cameraSetPAEEvBiasR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetSAEEvBiasR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetSAEShutterR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetWdrR` | function | reversible_write | meet+tailair+tiny |  | `include/dev/dev.hpp` |
@@ -405,6 +421,7 @@ table is the evidence for what the public surface actually contains.
 | `cameraSetTakePhotosR` | function | reversible_write | tailair+tiny |  | `include/dev/dev.hpp` |
 | `cameraSetVideoRecordR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `startNetworkScanImmediately` | function | command | generic |  | `include/dev/devs.hpp` |
+| `uvcVersion` | function | unknown | generic |  | `include/dev/dev.hpp` |
 | `videoFormatInfo` | function | destructive | generic |  | `include/dev/dev.hpp` |
 | `DevMediaConfig` | struct | data | generic | 7 fields | `include/dev/dev.hpp` |
 | `DevMediaEncodeParam` | struct | data | generic | 5 fields | `include/dev/dev.hpp` |
@@ -427,6 +444,7 @@ table is the evidence for what the public surface actually contains.
 | `HdmiOutputContent` | enum | data | generic | 2 members | `include/dev/dev.hpp` |
 | `RtspOrNdiEnabled` | enum | data | generic | 3 members | `include/dev/dev.hpp` |
 | `aiSetGestureCtrlIndividualR` | function | reversible_write | tailair+tiny |  | `include/dev/dev.hpp` |
+| `cameraGetHdmiInfoR` | function | read_only | tailair |  | `include/dev/dev.hpp` |
 | `cameraGetLiveEncodeParamR` | function | read_only | tail2 |  | `include/dev/dev.hpp` |
 | `cameraGetNdiRtspBitrateLevelR` | function | read_only | tailair |  | `include/dev/dev.hpp` |
 | `cameraGetNdiRtspEncoderFormatR` | function | destructive | tailair |  | `include/dev/dev.hpp` |
@@ -439,6 +457,7 @@ table is the evidence for what the public surface actually contains.
 | `cameraSetNdiRtspResolutionR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `cameraSetSelectNdiOrRtspR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `sysMgClearIndicatorStateR` | function | destructive | tail2+tailair |  | `include/dev/dev.hpp` |
+| `sysMgSetIndicatorStateR` | function | reversible_write | tail2+tailair |  | `include/dev/dev.hpp` |
 | `DevLiveStreamModeSetting` | struct | data | generic | 2 fields | `include/dev/dev.hpp` |
 | `DevMediaParamHdmi` | struct | data | generic | 3 fields | `include/dev/dev.hpp` |
 | `DevMediaParamSrt` | struct | data | generic | 10 fields | `include/dev/dev.hpp` |
@@ -449,6 +468,7 @@ table is the evidence for what the public surface actually contains.
 
 | symbol | kind | risk | applicability | size | file |
 |---|---|---|---|---|---|
+| `btDevFoundCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `wifiCfgCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `wifiInfoFoundCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `DevEthernetState` | enum | data | generic | 6 members | `include/dev/dev.hpp` |
@@ -482,6 +502,8 @@ table is the evidence for what the public surface actually contains.
 | `PermissionSteps` | enum | data | generic | 4 members | `include/dev/devs.hpp` |
 | `askCheckResult` | function | unknown | generic |  | `include/dev/devs.hpp` |
 | `close` | function | unknown | generic |  | `include/dev/devs.hpp` |
+| `dlog` | function | unknown | generic |  | `include/util/comm.hpp` |
+| `dlogva` | function | unknown | generic |  | `include/util/comm.hpp` |
 | `fastStateCnt` | function | unknown | generic |  | `include/dev/dev.hpp` |
 | `isInited` | function | read_only | generic |  | `include/dev/dev.hpp` |
 | `productType` | function | unknown | generic |  | `include/dev/dev.hpp` |
@@ -493,8 +515,6 @@ table is the evidence for what the public surface actually contains.
 | `AccessoryUgInfo` | struct | data | generic | 2 fields | `include/dev/dev.hpp` |
 | `ButtonAction` | struct | data | generic | 3 fields | `include/dev/dev.hpp` |
 | `KwsAction` | struct | data | generic | 2 fields | `include/dev/dev.hpp` |
-| `meet` | struct | data | meet | 26 fields | `include/dev/dev.hpp` |
-| `tiny` | struct | data | meet+tiny | 44 fields | `include/dev/dev.hpp` |
 | `<anonymous:59>` | union | data | generic | 2 fields | `include/dev/devs.hpp` |
 
 ## family: power
@@ -505,6 +525,7 @@ table is the evidence for what the public surface actually contains.
 | `DevUSBModeType` | enum | data | tailair+tiny | 7 members | `include/dev/dev.hpp` |
 | `DevUsbPlugStatus` | enum | data | generic | 2 members | `include/dev/dev.hpp` |
 | `PowerLineFreqType` | enum | data | generic | 4 members | `include/dev/dev.hpp` |
+| `cameraSetPowerCtrlActionR` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 
 ## family: preset
 
@@ -535,6 +556,7 @@ table is the evidence for what the public surface actually contains.
 | `FastDevStatusCallback` | callback | unknown | generic |  | `include/dev/dev.hpp` |
 | `RxDataCallback` | callback | unknown | generic |  | `include/dev/dev.hpp` |
 | `RxDataWithLenCallback` | callback | unknown | generic |  | `include/dev/dev.hpp` |
+| `devChangedCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `devCheckPermisionCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `devConnectFailedCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
 | `devSnInfoCallback` | callback | unknown | generic |  | `include/dev/devs.hpp` |
@@ -559,6 +581,7 @@ table is the evidence for what the public surface actually contains.
 | `AiStatus` | struct | data | tiny | 18 fields | `include/dev/dev.hpp` |
 | `SysStatusInfo` | struct | data | generic | 11 fields | `include/dev/dev.hpp` |
 | `transParentCommitCameraStatusCache` | struct | data | generic | 8 fields | `include/dev/dev.hpp` |
+| `CameraStatus` | union | data | generic | 3 fields | `include/dev/dev.hpp` |
 
 ## family: storage
 
@@ -599,6 +622,7 @@ table is the evidence for what the public surface actually contains.
 | `aiSetAiAutoZoomR` | function | reversible_write | tailair+tiny |  | `include/dev/dev.hpp` |
 | `aiSetSelectBiggestTarget` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `aiSetSelectCentralTarget` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
+| `aiSetSelectTargetByBox` | function | reversible_write | tailair |  | `include/dev/dev.hpp` |
 | `aiSetSelectedTargetR` | function | reversible_write | tail2 |  | `include/dev/dev.hpp` |
 | `aiSetTargetSelectR` | function | reversible_write | tiny |  | `include/dev/dev.hpp` |
 | `aiSetTargetViewTypeR` | function | reversible_write | tail2 |  | `include/dev/dev.hpp` |

@@ -15,7 +15,7 @@
 ## 1. 交付物
 
 - `tools/sdk_census.py` + `tests/test_sdk_census.py`（发现式 root inventory；原 10 项 + 7 项 discovery 测试）
-- `docs/Tail2_SDK_CENSUS.md`（sanitized，当前生成结果 **479 symbols**；3 public headers + 1 sample + 1 build + 29 binaries，unclassified=0）
+- `docs/Tail2_SDK_CENSUS.md`（sanitized；3 public headers + 1 sample + 1 build + 29 binaries，unclassified=0）。当前 symbol 数量以生成产物为准，且以 `Parser completeness` 段的 candidate/parsed/unmatched 作为完整性证据——不再以数字本身作证据。
 - `docs/Tail2_SDK_TRUTH_MAP.md`（v2，Wave A 已回填）
 - `docs/Tail2_SDK_EXPERIMENT_MATRIX.md`（Wave A 45 条 + 结果表）
 - probe 扩展（`native/main.cpp`）：`gimbal.angle / gimbal.speed / gimbal.native_stop / gimbal.state.get /
