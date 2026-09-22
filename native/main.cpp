@@ -273,6 +273,34 @@ public:
             const int rc=call("cameraGetWdrR",[&]{return dev_->cameraGetWdrR(mode);});
             j::object out{{"rc",rc}}; if(rc==0) out["wdr"]=mode; return out;
         }
+        if (op=="media.encode.get") {
+            compatibility(); const std::string kind=str(a,"kind");
+            const bool night=a.if_contains("night")?boolean(a,"night"):false;
+            Device::DevMediaEncodeParam p{};
+            int rc=-1;
+            if(kind=="record") rc=call("cameraGetRecordEncodeParamR",[&]{return dev_->cameraGetRecordEncodeParamR(p,night);});
+            else if(kind=="output") rc=call("cameraGetOutputEncodeParamR",[&]{return dev_->cameraGetOutputEncodeParamR(p,night);});
+            else if(kind=="live") rc=call("cameraGetLiveEncodeParamR",[&]{return dev_->cameraGetLiveEncodeParamR(p,night);});
+            else throw std::runtime_error("kind must be record|output|live");
+            j::object out{{"kind",kind},{"rc",rc}};
+            if(rc==0){ out["width"]=p.width; out["height"]=p.height; out["fps"]=p.fps;
+                       out["bitrate"]=p.bitrate; out["encode_format"]=static_cast<int>(p.encode_format); }
+            return out;
+        }
+        if (op=="media.op.get") {
+            compatibility(); const int stream_id=static_cast<int>(num(a,"stream",0,20));
+            Device::DevMediaParamOperation action=Device::DevMediaParamOperationAuto;
+            const int rc=call("cameraGetMediaOperateParamR",[&]{return dev_->cameraGetMediaOperateParamR(
+                static_cast<Device::DevMediaStreamId>(stream_id),action);});
+            j::object out{{"stream",stream_id},{"rc",rc}};
+            if(rc==0) out["operation"]=static_cast<int>(action);
+            return out;
+        }
+        if (op=="media.split.get") {
+            compatibility(); Device::DevVideoSplitSizeType v=Device::DevVideoSplitAuto;
+            const int rc=call("cameraGetRecordSplitSizeR",[&]{return dev_->cameraGetRecordSplitSizeR(v);});
+            j::object out{{"rc",rc}}; if(rc==0) out["split"]=static_cast<int>(v); return out;
+        }
         if (op=="status.callbacks.get") {
             j::object out{{"status_count",status_count.load()},{"status_age_ms",status_received_ms.load()?now_ms()-status_received_ms.load():-1},
                           {"fast_status_count",fast_status_count.load()},{"fast_status_age_ms",fast_status_received_ms.load()?now_ms()-fast_status_received_ms.load():-1},
@@ -551,6 +579,23 @@ public:
         } else if(op=="iq.wdr.set") {
             compatibility(); const int v=static_cast<int>(num(a,"value",0,4));
             checked_rc(call("cameraSetWdrR",[&]{return dev_->cameraSetWdrR(v);}));
+        } else if(op=="media.encode.set") {
+            compatibility(); const std::string kind=str(a,"kind");
+            const bool night=a.if_contains("night")?boolean(a,"night"):false;
+            Device::DevMediaEncodeParam p{};
+            p.width=static_cast<int>(num(a,"width",-1,100000));
+            p.height=static_cast<int>(num(a,"height",-1,100000));
+            p.fps=static_cast<int>(num(a,"fps",-1,1000));
+            p.bitrate=static_cast<int>(num(a,"bitrate",-1,1000000000));
+            p.encode_format=static_cast<Device::DevVideoEncoderFormat>(
+                static_cast<int>(num(a,"encode_format",0,5)));
+            if(kind=="record") checked_rc(call("cameraSetRecordEncodeParamR",[&]{return dev_->cameraSetRecordEncodeParamR(p,night);}));
+            else if(kind=="output") checked_rc(call("cameraSetOutputEncodeParamR",[&]{return dev_->cameraSetOutputEncodeParamR(p,night);}));
+            else throw std::runtime_error("kind must be record|output (live encode has no public setter)");
+        } else if(op=="media.split.set") {
+            compatibility(); const int v=static_cast<int>(num(a,"value",0,6));
+            checked_rc(call("cameraSetRecordSplitSizeR",[&]{return dev_->cameraSetRecordSplitSizeR(
+                static_cast<Device::DevVideoSplitSizeType>(v));}));
         } else if(op=="power.ctrl") {
             compatibility(); const int act=static_cast<int>(num(a,"action",0,4));
             checked_rc(call("cameraSetPowerCtrlActionR",[&]{return dev_->cameraSetPowerCtrlActionR(
