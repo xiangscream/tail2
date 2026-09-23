@@ -254,6 +254,7 @@ Accepted as **evidence_insufficient** for Wave B (reason recorded, not "unmeasur
 | UVC coexistence | **CONSTRAINED** | frames + readback | no conflict observed while native ops were merely accepted; native-active case unreachable |
 | `cameraGetSelectNdiOrRtspR` / `NdiRtspEncoderFormatR` | **READBACK_VERIFIED** | readback | select 0, format 1 |
 | `cameraGetNdiRtspBitrateLevelR` | **contract anomaly** | readback | returned 60000000 for an enum-typed (`DevVideoBitLevelType`) out-param |
+| RTSP/NDI/SRT receiver-level evidence | **NOT_PRODUCT_RELEVANT** | product decision | the MVP does not involve network receivers; no sink was provided and none is planned |
 | `cameraSetSelectNdiOrRtspR` / `NdiRtspBitrateLevelR` / `NdiRtspEncoderFormatR` / `HdmiInfoR` | `no_effect_observed` | read/write/restore | rc=0, readback unchanged (doc = tailair) |
 | `cameraGetHdmiInfoR` | **READBACK_VERIFIED** | readback | all fields 0 |
 | SDI / SRT configuration | **NO_PUBLIC_PATH** | static | enums only, no getter/setter functions |
@@ -306,7 +307,7 @@ repeat that mistake in the opposite direction. These remain explicitly flagged g
 - [x] Wave D explicitly records unsupported / deferred gaps
 - [x] no architecture-significant API left as an unexplained `[U]`
 - [ ] B1b real-human gesture session (deferred, pre-freeze)
-- [ ] optional C4 receiver-level verification (needs a network sink)
+- [x] C4 receiver-level verification: **NOT_PRODUCT_RELEVANT** — product decision (the MVP does not involve RTSP/NDI/SRT receivers)
 
 ### Appendix A — full closure table
 

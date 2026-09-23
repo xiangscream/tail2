@@ -74,7 +74,7 @@ Auto(0)=rc -1
 - HDMI `cameraGetHdmiInfoR`：全部 0（osd_language/content/volume/resolution/info_display）。
 - 写路径（select / bitrate / hdmi volume / info_display）rc=0 但**回读不变** ⇒ `no_effect_observed`（文档=tailair）。
 - **SDI / SRT 只有枚举没有函数** ⇒ `NO_PUBLIC_PATH`；`cameraSetNdiRtspResolutionR` 无 getter。
-- “接收端真收到”未做：没有配置网络目标 ⇒ `prerequisite_unmet`。
+- “接收端真收到”**不属于产品范围**：操作者确认 MVP 不涉及 RTSP/NDI/SRT 接收端 ⇒ `NOT_PRODUCT_RELEVANT`（不是待补 gap）。
 
 ## 5. C5 Media state / callbacks
 
@@ -98,7 +98,7 @@ Auto(0)=rc -1
 
 ## 8. 未做 / 下一轮
 
-- receiver 级证据（RTSP/NDI/SRT）：需要网络目标；只到 readback。
+- receiver 级证据（RTSP/NDI/SRT）：**产品决定不做**（MVP 不涉及网络接收端）⇒ `NOT_PRODUCT_RELEVANT`。
 - HDMI/SDI 物理 sink：无硬件，不采购。
 - 媒体事件回调 payload：无公开契约。
 - 有存储时的 record artifact closure：按产品决定不做。

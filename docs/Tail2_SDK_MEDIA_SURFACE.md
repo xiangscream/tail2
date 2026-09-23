@@ -92,8 +92,8 @@ that can be tied to an artifact/stream observation; record both.
 | C2 | `Record` start → status/readback → artifact → stop | recording state changes + artifact exists and reopens; needs storage |
 | C2 | `Capture` start → new artifact after request | new artifact appears after the request (getter known to fail) |
 | C3 | UVC closed → native op; UVC open → native op; native active → UVC open; stop → UVC recovery | one resource succeeds while the other loses availability or cannot transition; record frame availability/fps/epoch |
-| C4 | RTSP/NDI select + config readback; receiver actually receives | receiver bytes/frames, not `rc=0` |
-| C4 | SRT config path | address/key local only; receiver-based predicate; network-unmet ⇒ `prerequisite_unmet` |
+| C4 | RTSP/NDI select + config readback; receiver actually receives | receiver bytes/frames, not `rc=0` — **receiver-level is NOT_PRODUCT_RELEVANT** (product decision: the MVP does not involve network receivers) |
+| C4 | SRT config path | address/key local only; receiver-based predicate; **out of product scope** (no network receivers in the MVP) |
 | C4 | HDMI/SDI getters + reversible config | readback closed loop; no sink ⇒ at most `READBACK_VERIFIED` |
 | C5 | media operation vs ordinary callback | callback count + timestamp tied to the operation; media-specific callback delivery vs unknown payload |
 
@@ -127,3 +127,11 @@ that can be tied to an artifact/stream observation; record both.
 | SDI / SRT config | **NO_PUBLIC_PATH** | enums only, no functions |
 | device-native artifact retrieval | **NO_PUBLIC_PATH** | download family documented meet+tiny; not product-relevant for this MVP |
 | media state via callback | `evidence_insufficient` | ordinary callback fires ~2 s but the `CameraStatus` union has no documented Tail2 layout ⇒ getter is authoritative |
+
+## 9. Product decision: network outputs
+
+The operator confirmed the MVP will **not** involve RTSP/NDI/SRT receivers. Therefore
+receiver-level evidence for those outputs is `NOT_PRODUCT_RELEVANT`, not a pending
+gap: the device-side selectors/readbacks are already classified, and no receiver
+verification will be attempted. `host_uvc` remains the only media provider the MVP
+relies on.

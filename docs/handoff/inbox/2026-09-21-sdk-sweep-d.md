@@ -55,6 +55,8 @@ tail air 却能把 Tail2 关掉）。没有实测就宣称“不支持”，等�
 
 ## 4. Freeze gate（plan §10）状态
 
+（唯一剩余 gap：B1b 真人手势会话，已登记、不阻塞。）
+
 - [x] Phase 0 census 覆盖完整 SDK 资源（completeness gate，unmatched 0）
 - [x] Wave A 收口
 - [x] Wave B 高/中价值能力收口
@@ -62,7 +64,7 @@ tail air 却能把 Tail2 关掉）。没有实测就宣称“不支持”，等�
 - [x] Wave D 明确记录 unsupported / deferred
 - [x] 无 architecture-significant API 留成未解释的 `[U]`
 - [ ] **B1b 真人手势会话**（已登记，Primitive Freeze 前补；不阻塞）
-- [ ] **C4 receiver 级验证**（可选，需要一台同网段接收端）
+- [x] **C4 receiver 级验证 = `NOT_PRODUCT_RELEVANT`**（产品决定：MVP 不涉及 RTSP/NDI/SRT 接收端）
 
 ## 5. Git 说明（重要）
 

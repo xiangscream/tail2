@@ -203,5 +203,5 @@ Raw evidence: `.local/sdk-sweep/waveC-log.md`.
 | C3 UVC open vs native op | **CONSTRAINED** | UVC frames unaffected; native never active |
 | C4 NDI/RTSP/HDMI readback | **READBACK_VERIFIED** | setters `no_effect_observed`; bitrate-level contract anomaly |
 | C4 SDI/SRT | **NO_PUBLIC_PATH** | enums only |
-| C4 receiver-level | `prerequisite_unmet` | no network target configured |
+| C4 receiver-level | **NOT_PRODUCT_RELEVANT** | product decision: the MVP does not involve network receivers |
 | C5 media state via callback | `evidence_insufficient` | ordinary callback fires; union unparseable |
