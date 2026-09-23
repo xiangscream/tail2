@@ -1,5 +1,14 @@
 # Tail2 SDK 能力底座（M1 原语层输入）
 
+> **Superseded (2026-09-21):** this M0-era map is kept for history. The
+> authoritative, measured status of every capability is
+> [`Tail2_SDK_TRUTH_MAP.md`](Tail2_SDK_TRUTH_MAP.md) v1.0. Known stale claims
+> here: native gimbal family marked `[U]` is actually `VERIFIED`; `look` is not
+> limited to the ±10 dps nudge; `aiSetControlParaR` is `READBACK_VERIFIED`;
+> offset values are `UNSUPPORTED_TAIL2`; `cameraSetPowerCtrlActionR` powers the
+> device off. Do not use this file for capability decisions.
+
+
 2026-09-20 · 供 M1 设计能力原语与 Provider。基于本地 `libdev_v2.1.0_8`（`include/dev/dev.hpp` SHA256 `d6f12cd9…f74f2d`）静态通读 + M0/M0.5 真机结果。厂商头文件/库不入库。
 
 **状态图例**：`[V]` 真机已证实（有视觉/行为/回读证据）；`[A]` SDK 接受（rc=0）但未证实行为；`[U]` 未测/未知；`[X]` 无接口或不适用。

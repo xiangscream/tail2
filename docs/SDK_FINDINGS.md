@@ -1,5 +1,12 @@
 # SDK 核对与能力事实
 
+> **Superseded (2026-09-21):** see [`Tail2_SDK_TRUTH_MAP.md`](Tail2_SDK_TRUTH_MAP.md)
+> v1.0 for measured truth, and `docs/Tail2_SDK_CENSUS.md` for the
+> completeness-gated symbol inventory. Several statements here (native gimbal
+> `[U]`, preset/recall untestable, media setters accepted) have since been
+> measured; treat this file as the M0 record only.
+
+
 核对对象：用户提供的 `libdev_v2.1.0_8`，2026-09-20。头文件与库只在授权环境使用，仓库不附副本。
 
 `include/dev/dev.hpp` SHA256：

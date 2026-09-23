@@ -1,4 +1,4 @@
-# Tail2 SDK Truth Map (v4 — Wave A + Wave B + Wave C measured)
+# Tail2 SDK Truth Map v1.0 (frozen — Wave A + B + C measured, Wave D closed)
 
 2026-09-21 · branches `feature/sdk-sweep-a`, `feature/sdk-sweep-b` · baselines:
 
@@ -11,6 +11,7 @@
 - device: Tail2, firmware 7.2.9.41, UVC, Windows x64 build, operator present, OBSBOT Center closed
 - raw evidence: `.local/sdk-sweep/waveA-log.md`, `.local/sdk-sweep/waveB-log.md` (local only)
 - Wave C media surface + measured results: `docs/Tail2_SDK_MEDIA_SURFACE.md`
+- Wave D closure table (generated): `tools/closure_table.py` (Appendix A below)
 
 ## 0. Status vocabulary
 
@@ -259,3 +260,317 @@ Accepted as **evidence_insufficient** for Wave B (reason recorded, not "unmeasur
 | device-native artifact retrieval | **NO_PUBLIC_PATH** | static | download family documented meet+tiny |
 | media state via callback | `evidence_insufficient` | event count | ordinary callback ~2 s; `CameraStatus` union layout undocumented ⇒ getter authoritative |
 | long media experiments | **CONSTRAINED (link risk)** | observation | USB enumeration failed / device dropped twice (once after PowerOff, once mid media read); recovered by physical re-plug |
+
+## 9. Wave D closure
+
+Every function/callback in the Tail2-relevant families (gimbal, target, track, ai,
+camera, media, media.output, iq, gesture, preset, status, power) now carries an
+explicit disposition. **No architecture-significant symbol is left as a bare `[U]`.**
+
+| disposition | count | meaning |
+|---|---|---|
+| `VERIFIED` | 23 | physical / visual / state behaviour reproduced on Tail2 |
+| `READBACK_VERIFIED` | 38 | getter / status path proven |
+| `CONSTRAINED` | 5 | works only under stated conditions |
+| `ACCEPTED_UNPROVEN` | 16 | rc accepted or Tail2-claimed, not proven |
+| `UNSUPPORTED_TAIL2` | 14 | measured no effect / rejected |
+| `evidence_insufficient` | 9 | predicate could not be evaluated (reason recorded) |
+| `DEFERRED_UNSAFE` | 15 | destructive / persistent; not exercised by policy |
+| `DOC_OTHER_PRODUCT` | 140 | documented for another product, not exercised — **not** a support claim |
+| `NOT_PRODUCT_RELEVANT` | 2 | outside the Agent Camera MVP |
+| total | 262 | |
+
+`DOC_OTHER_PRODUCT` is deliberately **not** called `UNSUPPORTED_TAIL2`: Wave A/B/C
+proved doc applicability wrong in both directions (the whole native gimbal family is
+documented `tailair+tiny` yet works; `cameraSetPowerCtrlActionR` is documented
+`tail air` yet powers a Tail2 off). Claiming "unsupported" without measurement would
+repeat that mistake in the opposite direction. These remain explicitly flagged gaps.
+
+### Closure classes required by the plan
+
+| class | items |
+|---|---|
+| documented for Tail Air / Tiny / Meet but not Tail2 | the `DOC_OTHER_PRODUCT` set (Appendix A) |
+| incomplete public payload contract | `DevCDCNotifyTypeAiTarget` (candidate notification), device-side tracking-box/identity readback, media event payload, `CameraStatus` union layout |
+| tracking-box / identity readback absence | confirmed absent: no native tracking box, identity is device-decided |
+| file download not documented for Tail2 | `startFileDownloadAsync`, `setFileDownloadCallback`, `localFilePath`, `localFileMiniPath` (meet+tiny) |
+| destructive operations intentionally not run | the `DEFERRED_UNSAFE` set (factory reset, gimbal reset, boot position write, zone reset, indicator clear, file delete/format/upgrade/download) |
+| capabilities with no product relevance | TWS/earbuds, network configuration, HDMI/NDI boxes, zone presets |
+
+### Primitive-layer freeze gate (plan §10)
+
+- [x] Phase 0 census covers the full SDK resource (completeness gate, unmatched 0)
+- [x] Wave A closed
+- [x] Wave B closed for high/medium primitive-value capabilities
+- [x] Wave C has a clear truth state even where host_uvc remains preferred
+- [x] Wave D explicitly records unsupported / deferred gaps
+- [x] no architecture-significant API left as an unexplained `[U]`
+- [ ] B1b real-human gesture session (deferred, pre-freeze)
+- [ ] optional C4 receiver-level verification (needs a network sink)
+
+### Appendix A — full closure table
+
+| symbol | kind | risk | doc applicability | Wave D disposition | basis |
+|---|---|---|---|---|---|
+| `aiDelAutoGroupModeR` | function | unknown | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetAutoOffsetEnable` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetControlParaR` | function | read_only | tail2 | READBACK_VERIFIED | all 24 params |
+| `aiGetControlParaR` | function | read_only | generic | READBACK_VERIFIED | all 24 params |
+| `aiGetControlParaR` | function | read_only | generic | READBACK_VERIFIED | all 24 params |
+| `aiGetHorizontalOffset` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetVerticalOffset` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiSetAutoOffset` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetButtonSwitchR` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetControlParaR` | function | reversible_write | tail2 | VERIFIED | 23/24 writable + readback; Pan/PitchLocked verified behaviourally |
+| `aiSetControlParaR` | function | reversible_write | generic | VERIFIED | 23/24 writable + readback; Pan/PitchLocked verified behaviourally |
+| `aiSetControlParaR` | function | reversible_write | generic | VERIFIED | 23/24 writable + readback; Pan/PitchLocked verified behaviourally |
+| `aiSetEnabledR` | function | reversible_write | tailair+tiny | VERIFIED | AI on/off behaviour |
+| `aiSetHorizontalOffset` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetVerticalOffset` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `setTailAirWhiteList` | function | read_only | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetAntiFlickR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetConfigRange` | function | read_only | tail2 | ACCEPTED_UNPROVEN | Tail2-claimed in the header; not exercised by this sweep |
+| `cameraGetDelayTimeInTimelapse` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetModuleActiveR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeAntiFlickR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRotationDegree` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetWatermarkAttributeR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraSetAiModeU` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetAntiFlickR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetBgColorU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetBgEnableU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetBgModeU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetButtonModeU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetCancelDelayActionInTimelapse` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetCustomizeButtonActionU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetDelayTimeInTimelapse` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetFovU` | function | reversible_write | meet+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetKcpPreviewResolutionR` | function | reversible_write | tailair | NOT_PRODUCT_RELEVANT | outside the Agent Camera MVP (other product form factor / platform) |
+| `cameraSetLedCtrlU` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMaskLevelU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetResourceActionU` | function | reversible_write | meet+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetRestoreFactorySettingsR` | function | destructive | generic | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `cameraSetRotationDegree` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetSuspendTimeU` | function | reversible_write | meet+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetVerticalModeU` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetWatermarkAttributeR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetGestureParaR` | function | read_only | tail2 | READBACK_VERIFIED | 9 params |
+| `aiGetGestureParaR` | function | read_only | generic | READBACK_VERIFIED | 9 params |
+| `aiGetGestureTrackParaR` | function | read_only | tail2 | READBACK_VERIFIED | 9 params |
+| `aiGetGestureTrackParaR` | function | read_only | generic | READBACK_VERIFIED | 9 params |
+| `aiGetGestureTrackParaR` | function | read_only | generic | READBACK_VERIFIED | 9 params |
+| `aiSetGestureCtrlR` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetGestureParaR` | function | reversible_write | tail2 | READBACK_VERIFIED | writable + readback |
+| `aiSetGestureParaR` | function | reversible_write | generic | READBACK_VERIFIED | writable + readback |
+| `aiSetGestureTrackParaR` | function | reversible_write | tail2 | READBACK_VERIFIED | writable + readback |
+| `aiSetGestureTrackParaR` | function | reversible_write | generic | READBACK_VERIFIED | writable + readback |
+| `aiSetGestureTrackParaR` | function | reversible_write | generic | READBACK_VERIFIED | writable + readback |
+| `dev_get_log_handler` | function | read_only | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `dev_set_log_handler` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiAddGimbalPresetR` | function | reversible_write | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiDelGimbalPresetR` | function | unknown | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetGimbalBootPosR` | function | read_only | tailair+tiny | READBACK_VERIFIED | id 0, pose 0/0/0 |
+| `aiGetGimbalParaR` | function | read_only | tail2 | READBACK_VERIFIED | float overload; bool overload is a trap |
+| `aiGetGimbalParaR` | function | read_only | tail2+tailair | READBACK_VERIFIED | float overload; bool overload is a trap |
+| `aiGetGimbalPresetInfoWithIdR` | function | read_only | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetGimbalPresetListR` | function | read_only | tailair+tiny | READBACK_VERIFIED | len 0 |
+| `aiGetGimbalPresetNameWithIdR` | function | read_only | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetGimbalStateR` | function | read_only | tailair+tiny | READBACK_VERIFIED | euler + motor + velocity |
+| `aiRstGimbalBootPosR` | function | destructive | tailair+tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiSetGimbalBootPosR` | function | reversible_write | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetGimbalMotorAngleR` | function | reversible_write | tailair+tiny | VERIFIED | rc + readback + visual, 3 reps |
+| `aiSetGimbalParaR` | function | reversible_write | tail2 | CONSTRAINED | PanReverse ok; PresetSpeed 0.5 ok / 2.0 ignored; limits stored not enforced |
+| `aiSetGimbalParaR` | function | reversible_write | tail2+tailair | CONSTRAINED | PanReverse ok; PresetSpeed 0.5 ok / 2.0 ignored; limits stored not enforced |
+| `aiSetGimbalPresetNameWithIdR` | function | reversible_write | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetGimbalSpeedCtrlR` | function | reversible_write | tailair+tiny | VERIFIED | rc + readback + visual |
+| `aiSetGimbalStop` | function | reversible_write | tailair+tiny | VERIFIED | residual <= 0.01 deg |
+| `aiSetGimbalYawDirReverseR` | function | reversible_write | tailair+tiny | ACCEPTED_UNPROVEN | rc=0, no readback/visual effect |
+| `aiTrgGimbalBootPosR` | function | command | tailair+tiny | VERIFIED | yaw10/pitch5 -> exactly 0/0 |
+| `aiTrgGimbalPresetR` | function | command | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiUpdGimbalPresetR` | function | unknown | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetPanTiltAbsolute` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetPanTiltRelative` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `gimbalGetAttitudeInfoR` | function | read_only | tailair+tiny | VERIFIED | readback (intermittent rc=-1) |
+| `gimbalRstPosR` | function | destructive | tailair+tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `gimbalSetSpeedPositionR` | function | reversible_write | tailair+tiny | VERIFIED | rc + readback |
+| `gimbalSpeedCtrlR` | function | command | tailair+tiny | VERIFIED | legacy baseline, rc + physical |
+| `cameraGetAAEEvBiasR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetAELockR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetAFCTrackModeR` | function | read_only | tail2 | READBACK_VERIFIED | readback |
+| `cameraGetAutoFocusModeR` | function | read_only | tail2+tailair | READBACK_VERIFIED | readback |
+| `cameraGetExposureAbsolute` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetExposureModeR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetFaceAER` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetFocusAbsolute` | function | read_only | meet+tail2+tailair+tiny | READBACK_VERIFIED | focus + auto_focus |
+| `cameraGetFocusPosR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetISOLimitR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetImageBrightnessR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetImageContrastR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetImageHueR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetImageSaturationR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetImageSharpR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetMAEIsoR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetMAEShutterR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetPAEEvBiasR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeExposureAbsolute` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeFocusAbsolute` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeImageBrightnessR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeImageContrastR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeImageHueR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeImageSaturationR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeImageSharpR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeMAEIsoR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangePAEEvBiasR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetRangeWhiteBalanceR` | function | read_only | meet+tailair+tiny | READBACK_VERIFIED | readback |
+| `cameraGetSAEShutterR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetWdrListR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetWdrR` | function | read_only | tailair | READBACK_VERIFIED | readback (async) |
+| `cameraGetWhiteBalanceListR` | function | read_only | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetWhiteBalanceR` | function | read_only | meet+tailair+tiny | READBACK_VERIFIED | readback |
+| `cameraGetWhiteBalanceR` | function | read_only | tail2 | READBACK_VERIFIED | readback |
+| `cameraSetAAEApertureR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetAAEEvBiasR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetAELockR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetAFCTrackModeR` | function | reversible_write | tail2+tailair | READBACK_VERIFIED | writable + readback |
+| `cameraSetAutoFocusModeR` | function | reversible_write | tail2+tailair | READBACK_VERIFIED | writable + readback |
+| `cameraSetExposureAbsolute` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetExposureModeR` | function | reversible_write | tailair | ACCEPTED_UNPROVEN | probe op exists, not closed |
+| `cameraSetFaceAER` | function | reversible_write | generic | ACCEPTED_UNPROVEN | probe op exists, not closed |
+| `cameraSetFaceFocusR` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetFocusAbsolute` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetFocusPosR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetISOLimitR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageBrightnessR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageContrastR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageFlipHorizonU` | function | reversible_write | meet+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageHueR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageSaturationR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageSharpR` | function | reversible_write | meet+tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetImageStyleR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMAEApertureR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMAEIsoR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMAEShutterR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetPAEEvBiasR` | function | reversible_write | tailair | ACCEPTED_UNPROVEN | probe op exists, not closed |
+| `cameraSetSAEEvBiasR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetSAEShutterR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetWdrR` | function | reversible_write | meet+tailair+tiny | READBACK_VERIFIED | writable, readback lags seconds |
+| `cameraSetWhiteBalanceR` | function | reversible_write | meet+tailair+tiny | VERIFIED | readback + strong visual (tungsten blue cast) |
+| `cameraSetWhiteBalanceR` | function | reversible_write | tail2 | VERIFIED | readback + strong visual (tungsten blue cast) |
+| `UvcParamRange` | function | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `VideoFormatInfo` | function | destructive | generic | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `VideoFormatInfo` | function | destructive | generic | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiSetVideoCenter` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraGetMainVideoBitrateLevelR` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetMainVideoEncoderFormatR` | function | destructive | tailair | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `cameraGetMediaOperateParamR` | function | read_only | tail2 | READBACK_VERIFIED | per-stream readback |
+| `cameraGetOutputEncodeParamR` | function | read_only | tail2 | READBACK_VERIFIED | night_flag changes readback |
+| `cameraGetRecordEncodeParamR` | function | read_only | tail2 | READBACK_VERIFIED | 4K/60Mbps/H264; fps is milli-fps |
+| `cameraGetRecordSplitSizeR` | function | read_only | tailair | VERIFIED | readback |
+| `cameraSetMainVideoBitrateLevelR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMainVideoEncoderFormatR` | function | destructive | tailair | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `cameraSetMediaModeU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetMediaOperateParamR` | function | reversible_write | tail2 | CONSTRAINED | accepted; Record state stays Stop (storage prerequisite) |
+| `cameraSetOutputEncodeParamR` | function | reversible_write | tail2 | CONSTRAINED | bitrate validated per resolution |
+| `cameraSetPhotoFormatR` | function | destructive | tailair | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `cameraSetPhotoQualityR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetRecordEncodeParamR` | function | reversible_write | tail2 | CONSTRAINED | bitrate validated per resolution; encode_format ignored |
+| `cameraSetRecordResolutionR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetRecordSplitSizeR` | function | reversible_write | tailair | VERIFIED | 5 -> 2 -> 5 |
+| `cameraSetTakePhotosR` | function | reversible_write | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetVideoRecordR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `startNetworkScanImmediately` | function | command | generic | NOT_PRODUCT_RELEVANT | outside the Agent Camera MVP (other product form factor / platform) |
+| `uvcVersion` | function | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `videoFormatInfo` | function | destructive | generic | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiSetGestureCtrlIndividualR` | function | reversible_write | tailair+tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraGetHdmiInfoR` | function | read_only | tailair | READBACK_VERIFIED | all fields 0 |
+| `cameraGetLiveEncodeParamR` | function | read_only | tail2 | READBACK_VERIFIED | 1080p/4Mbps; no public setter |
+| `cameraGetNdiRtspBitrateLevelR` | function | read_only | tailair | READBACK_VERIFIED | contract anomaly: returns 60000000 for an enum out-param |
+| `cameraGetNdiRtspEncoderFormatR` | function | destructive | tailair | READBACK_VERIFIED | format 1 |
+| `cameraGetSelectNdiOrRtspR` | function | read_only | tailair | READBACK_VERIFIED | select 0 |
+| `cameraSetBootNdiEnabledR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetDisableSleepWithoutStreamU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetHdmiInfoR` | function | reversible_write | tailair | UNSUPPORTED_TAIL2 | rc=0, readback unchanged |
+| `cameraSetNdiRtspBitrateLevelR` | function | reversible_write | tailair | UNSUPPORTED_TAIL2 | rc=0, readback unchanged |
+| `cameraSetNdiRtspEncoderFormatR` | function | destructive | tailair | UNSUPPORTED_TAIL2 | rc=0, readback unchanged |
+| `cameraSetNdiRtspResolutionR` | function | reversible_write | tailair | ACCEPTED_UNPROVEN | no getter; not exercised |
+| `cameraSetSelectNdiOrRtspR` | function | reversible_write | tailair | UNSUPPORTED_TAIL2 | rc=0, readback unchanged |
+| `sysMgClearIndicatorStateR` | function | destructive | tail2+tailair | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `sysMgSetIndicatorStateR` | function | reversible_write | tail2+tailair | ACCEPTED_UNPROVEN | not exercised |
+| `cameraSetPowerCtrlActionR` | function | reversible_write | tailair | VERIFIED | PowerOff removes the device from PnP + SDK list |
+| `aiAddZonePresetR` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiDelZonePresetR` | function | unknown | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetZonePresetInfoWithIdR` | function | read_only | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetZonePresetListR` | function | read_only | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetZonePresetNameWithIdR` | function | read_only | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiSetZonePresetNameWithIdR` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiTrgZonePresetR` | function | command | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiUpdZonePresetUpdateR` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetBootModeU` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `DevConfigRangeCallback` | callback | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `DevEventNotifyCallback` | callback | unknown | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `DevStatusCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `FastDevStatusCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `RxDataCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `RxDataWithLenCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetAiStatusR` | function | read_only | tailair+tiny | READBACK_VERIFIED | ai_main_mode / ai_sub_mode |
+| `cameraGetBootStatus` | function | read_only | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `cameraGetCameraStatusU` | function | read_only | generic | ACCEPTED_UNPROVEN | callable; union layout undocumented |
+| `cameraSetBootStatus` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetDevRunStatusR` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraStatus` | function | unknown | generic | ACCEPTED_UNPROVEN | callable; union layout undocumented |
+| `devChangedCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `devCheckPermisionCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `devConnectFailedCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `devSnInfoCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `devWakeUpCallback` | callback | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `enableDevStatusCallback` | function | reversible_write | generic | VERIFIED | required to arm the callback |
+| `fastNextRefreshDevStatus` | function | read_only | generic | ACCEPTED_UNPROVEN | callable; fast callback never fires |
+| `nextRefreshDevStatus` | function | read_only | generic | VERIFIED | triggers the ordinary callback |
+| `setDevChangedCallback` | function | reversible_write | generic | ACCEPTED_UNPROVEN | registered, 1 initial event; hotplug not exercised |
+| `setDevConnectFailedCallback` | function | reversible_write | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `setDevEventNotifyCallbackFunc` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `setDevStatusCallbackFunc` | function | reversible_write | generic | VERIFIED | ~2 s cadence after nextRefreshDevStatus |
+| `setFastDevStatusCallbackFunc` | function | reversible_write | generic | UNSUPPORTED_TAIL2 | 0 events in 50 s+ |
+| `aiDelSelectedTargetR` | function | unknown | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetAiAutoZoomR` | function | reversible_write | tailair+tiny | ACCEPTED_UNPROVEN | rc=0, no readback |
+| `aiSetSelectBiggestTarget` | function | reversible_write | tailair | ACCEPTED_UNPROVEN | rc=0, doc=tailair |
+| `aiSetSelectCentralTarget` | function | reversible_write | tailair | ACCEPTED_UNPROVEN | rc=0, doc=tailair |
+| `aiSetSelectTargetByBox` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetSelectedTargetR` | function | reversible_write | tail2 | VERIFIED | rc + physical + visual |
+| `aiSetTargetSelectR` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetTargetViewTypeR` | function | reversible_write | tail2 | ACCEPTED_UNPROVEN | 12 values rc=0, no state/visual effect |
+| `aiSetTargetZoomTypeR` | function | reversible_write | tail2 | READBACK_VERIFIED | ai_sub_mode reflects; visual unchanged |
+| `cameraGetRangeZoomAbsoluteR` | function | read_only | meet+tailair+tiny | VERIFIED | readback |
+| `cameraGetZoomAbsoluteR` | function | read_only | meet+tailair+tiny | VERIFIED | readback |
+| `cameraSetAutoFramingModeU` | function | reversible_write | meet | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetRoiTarget` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `cameraSetZoomAbsoluteR` | function | reversible_write | meet+tail2+tailair+tiny | VERIFIED | rc + readback + visual (slow async ramp) |
+| `cameraSetZoomStopR` | function | reversible_write | tailair | UNSUPPORTED_TAIL2 | measured no effect |
+| `cameraSetZoomWithSpeedAbsoluteR` | function | reversible_write | tailair+tiny | UNSUPPORTED_TAIL2 | measured no effect |
+| `cameraSetZoomWithSpeedRelativeR` | function | reversible_write | tailair | UNSUPPORTED_TAIL2 | measured no effect |
+| `normalizedZoom` | function | unknown | generic | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiGetLimitedZoneTrackAutoSelectR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiGetLimitedZoneTrackEnabledR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiGetLimitedZoneTrackInitPosR` | function | read_only | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (read path unproven on Tail2) |
+| `aiGetLimitedZoneTrackPitchMaxR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiGetLimitedZoneTrackPitchMinR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiGetLimitedZoneTrackYawMaxR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiGetLimitedZoneTrackYawMinR` | function | read_only | tiny | UNSUPPORTED_TAIL2 | rc -1 |
+| `aiRstLimitedZoneTrackInitPosR` | function | destructive | tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiRstLimitedZoneTrackPitchMaxR` | function | destructive | tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiRstLimitedZoneTrackPitchMinR` | function | destructive | tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiRstLimitedZoneTrackYawMaxR` | function | destructive | tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiRstLimitedZoneTrackYawMinR` | function | destructive | tiny | DEFERRED_UNSAFE | destructive; not exercised by policy |
+| `aiSetAiTrackModeEnabledR` | function | reversible_write | tail2+tailair+tiny | ACCEPTED_UNPROVEN | rc=0, does not change ai_main_mode |
+| `aiSetLimitedZoneTrackAutoSelectR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback |
+| `aiSetLimitedZoneTrackEnabledR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback, no effect |
+| `aiSetLimitedZoneTrackInitPosR` | function | reversible_write | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetLimitedZoneTrackPitchMaxR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback |
+| `aiSetLimitedZoneTrackPitchMinR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback |
+| `aiSetLimitedZoneTrackYawMaxR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback |
+| `aiSetLimitedZoneTrackYawMinR` | function | reversible_write | tiny | evidence_insufficient | rc=0, no readback |
+| `aiSetTrackSpeedTypeR` | function | reversible_write | tailair | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
+| `aiSetTrackingModeR` | function | reversible_write | tiny | evidence_insufficient | probe op added, not closed |
+| `aiSetZoneTrackGimbalEnabledR` | function | reversible_write | tiny | evidence_insufficient | probe op added, not closed |
+| `aiSetZoneTrackStateR` | function | reversible_write | tailair+tiny | evidence_insufficient | probe op added, not closed |
+| `aiTrgLimitedZoneTrackInitPosR` | function | command | tiny | DOC_OTHER_PRODUCT | documented for another product, not exercised (no Tail2 support claim) |
